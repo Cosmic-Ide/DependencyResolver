@@ -9,12 +9,12 @@ repositories {
 
 publishing {
   publications {
-    mavenJava(MavenPublication) {
-      groupId = 'org.cosmic.ide'
-      artifactId = 'dependency-resolver'
-      version = '1.0.0'
+    create<MavenPublication>("maven") {
+      groupId = "org.cosmic.ide"
+      artifactId = "dependency-resolver"
+      version = "1.0.0"
 
-      from components.java
+      from(components["java"])
     }
   }
 }
