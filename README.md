@@ -19,7 +19,7 @@ if (repository != null) {
     println("Cannot find artifact.")
 }
 ```
-
+NOTE: If you only want to download the artifact, you can use the `downloadTo` method instead.
 For downloading an artifact with all of its dependencies, you can do
 ```kt
 val output = File("<directory to download artifact>")

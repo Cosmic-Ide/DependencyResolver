@@ -5,7 +5,6 @@ import java.io.File
 import java.io.InputStream
 import java.net.URL
 import javax.xml.parsers.DocumentBuilderFactory
-import org.w3c.dom.Element
 
 data class Artifact(
     val groupId: String,
@@ -25,11 +24,12 @@ data class Artifact(
     }
 
     fun downloadArtifact(output: File) {
+        output.mkdirs()
         val artifacts = resolve()
         artifacts.add(this)
 
         val latestDeps =
-            artifacts.groupBy { it.groupId to it.artifactId }.values.map { it.maxBy { it.version } }
+            artifacts.groupBy { it.groupId to it.artifactId }.values.map { artifact -> artifact.maxBy { it.version } }
 
         latestDeps.forEach { art ->
             if (art.version.isNotEmpty() && art.repository != null) {
@@ -39,8 +39,7 @@ data class Artifact(
     }
 
     fun resolve(): MutableList<Artifact> {
-        val pom = getPOM()
-        if (pom == null) return mutableListOf()
+        val pom = getPOM() ?: return mutableListOf()
         val deps = pom.resolvePOM()
         val artifacts = mutableListOf<Artifact>()
         deps.forEach { dep ->

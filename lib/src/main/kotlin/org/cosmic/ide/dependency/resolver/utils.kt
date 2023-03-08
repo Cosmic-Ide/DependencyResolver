@@ -36,7 +36,7 @@ fun InputStream.resolvePOM(): List<Artifact> {
     val doc = builder.parse(this)
 
     val dependencies = doc.getElementsByTagName("dependencies").item(0) as Element?
-    if (dependencies == null) return artifacts
+        ?: return artifacts
     val dependencyElements = dependencies.getElementsByTagName("dependency")
     for (i in 0 until dependencyElements.length) {
         val dependencyElement = dependencyElements.item(i) as Element
