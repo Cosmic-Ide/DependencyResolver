@@ -22,7 +22,7 @@ fun initHost(artifact: Artifact): Artifact? {
             return artifact
         }
     }
-    println("No repository contains " + artifact.artifactId + ":" + artifact.version)
+    println("No repository contains ${ artifact.artifactId }:${ artifact.version }")
     return null
 }
 
@@ -57,8 +57,9 @@ fun InputStream.resolvePOM(): List<Artifact> {
         val item = dependencyElement.getElementsByTagName("version").item(0)
         if (item != null) {
             var version = item.textContent
+            // Some libraries POM define the compatible dependency versions in an array. 
             if (version.startsWith("[")) {
-                version = version.substringBefore("]").substringAfterLast(",")
+                version = version.substringAfter("[").substringBefore(",")
             }
             artifact.version = version
         }
