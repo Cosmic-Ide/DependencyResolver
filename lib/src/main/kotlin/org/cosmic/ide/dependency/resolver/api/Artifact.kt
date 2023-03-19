@@ -65,7 +65,7 @@ data class Artifact(
             return ""
         }
         val dependencyUrl =
-            "$repository/${ groupId.replace(".", "/") }/${ artifactId }/maven-metadata.xml"
+            "${ repository?.getURL() }/${ groupId.replace(".", "/") }/${ artifactId }/maven-metadata.xml"
         val contents = URL(dependencyUrl).readText()
         return contents
     }

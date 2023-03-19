@@ -21,8 +21,4 @@ interface Repository {
     fun getName(): String
 
     fun getURL(): String
-    
-    override fun toString(): String {
-        return getURL()
-    }
 }
