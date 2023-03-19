@@ -60,6 +60,17 @@ data class Artifact(
         return artifacts
     }
 
+    fun getMavenMetadata(): String {
+        if (repository == null) {
+            return ""
+        }
+        val dependencyUrl =
+            "$repository/${ groupId.replace(".", "/") }/${ artifactId }/maven-metadata.xml"
+        val contents = URL(dependencyUrl).readText()
+        return contents
+    }
+    
+
     fun getPOM(): InputStream? {
         val pomUrl =
             "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version.pom"

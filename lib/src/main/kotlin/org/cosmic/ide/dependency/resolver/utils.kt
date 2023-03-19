@@ -17,7 +17,7 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact?
  */
 fun initHost(artifact: Artifact): Artifact? {
     for (repository in repositories) {
-        if (repository.checkExists(artifact.groupId, artifact.artifactId, artifact.version)) {
+        if (repository.checkExists(artifact.groupId, artifact.artifactId)) {
             artifact.repository = repository
             return artifact
         }
@@ -43,6 +43,7 @@ fun InputStream.resolvePOM(): List<Artifact> {
         val scopeItem = dependencyElement.getElementsByTagName("scope").item(0)
         if (scopeItem != null) {
             val scope = scopeItem.textContent
+            // if scope is test/provided, there is no need to download them
             if (scope.isNotEmpty() && (scope == "test" || scope == "provided")) {
                 continue
             }
@@ -53,19 +54,33 @@ fun InputStream.resolvePOM(): List<Artifact> {
             continue
         }
         val artifact = Artifact(groupId, artifactId)
+        initHost(artifact)
+        if (artifact.repository == null) {
+            continue
+        }
 
+        val metadata = artifact.getMavenMetadata()
         val item = dependencyElement.getElementsByTagName("version").item(0)
         if (item != null) {
             var version = item.textContent
-            // Some libraries POM define the compatible dependency versions in an array. 
+            // Some libraries define an array of compatible dependency versions.
             if (version.startsWith("[")) {
-                version = version.substringAfter("[").substringBefore(",")
+                // remove square brackets so that we have something like `1.0.0,1.0.1` left
+                val versionArray = version.substring(1, version.length - 1)
+                val versions = versionArray.split(",")
+                // sometimes, some of the defined versions don't exist, so we need to check all of them
+                versions.forEach { v ->
+                    if (metadata.contains(v)) {
+                        version = v
+                    }
+                }
+                if (version.contains("[")) {
+                    continue
+                }
             }
             artifact.version = version
         }
-        if (initHost(artifact) != null) {
-            artifacts.add(artifact)
-        }
+        artifacts.add(artifact)
     }
     return artifacts
 }

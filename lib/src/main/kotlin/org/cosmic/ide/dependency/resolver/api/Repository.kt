@@ -5,13 +5,9 @@ import java.net.URL
 
 interface Repository {
 
-    fun checkExists(groupId: String, artifactId: String, version: String): Boolean {
+    fun checkExists(groupId: String, artifactId: String): Boolean {
         val repository = getURL()
-        val dependencyUrl = if (version.isNotEmpty())
-
-            "$repository/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.jar"
-            else
-            "$repository/${groupId.replace(".", "/")}/$artifactId/maven-metadata.xml"
+        val dependencyUrl = "$repository/${groupId.replace(".", "/")}/$artifactId/maven-metadata.xml"
         val url = URL(dependencyUrl)
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "HEAD"
@@ -19,16 +15,14 @@ interface Repository {
     }
 
     fun checkExists(artifact: Artifact): Boolean {
-        val repository = getURL()
-        val dependencyUrl =
-            "$repository/${ artifact.groupId.replace(".", "/") }/${ artifact.artifactId }/${ artifact.version }/${ artifact.artifactId }-${ artifact.version }.jar"
-        val url = URL(dependencyUrl)
-        val connection = url.openConnection() as HttpURLConnection
-        connection.requestMethod = "HEAD"
-        return connection.responseCode == 200
+        return checkExists(artifact.groupId, artifact.artifactId)
     }
 
     fun getName(): String
 
     fun getURL(): String
+    
+    override fun toString(): String {
+        return getURL()
+    }
 }
