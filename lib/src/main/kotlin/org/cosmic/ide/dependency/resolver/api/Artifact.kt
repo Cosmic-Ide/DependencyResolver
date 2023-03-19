@@ -2,6 +2,7 @@ package org.cosmic.ide.dependency.resolver.api
 
 import org.cosmic.ide.dependency.resolver.resolvePOM
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.net.URL
 import javax.xml.parsers.DocumentBuilderFactory
@@ -74,6 +75,9 @@ data class Artifact(
     fun getPOM(): InputStream? {
         val pomUrl =
             "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version.pom"
-        return URL(pomUrl).openConnection().inputStream
+        if (version.isNotEmpty()) {
+            return URL(pomUrl).openConnection().inputStream
+        }
+        return null
     }
 }
