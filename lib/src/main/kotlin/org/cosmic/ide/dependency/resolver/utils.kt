@@ -56,7 +56,11 @@ fun InputStream.resolvePOM(): List<Artifact> {
 
         val item = dependencyElement.getElementsByTagName("version").item(0)
         if (item != null) {
-            artifact.version = item.textContent
+            var version = item.textContent
+            if (version.startsWith("[")) {
+                version = version.substringBefore("]").substringAfterLast(",")
+            }
+            artifact.version = version
         }
         if (initHost(artifact) != null) {
             artifacts.add(artifact)
