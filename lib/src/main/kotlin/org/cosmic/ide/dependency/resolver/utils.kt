@@ -9,7 +9,14 @@ import org.w3c.dom.Element
 private val repositories by lazy { listOf(MavenCentral(), Jitpack(), GoogleMaven()) }
 
 fun getArtifact(groupId: String, artifactId: String, version: String): Artifact? {
-    return initHost(Artifact(groupId, artifactId, version))
+    val artifact = initHost(Artifact(groupId, artifactId, version))
+    val factory = DocumentBuilderFactory.newInstance()
+    val builder = factory.newDocumentBuilder()
+    val doc = builder.parse(artifact.getPOM()!!)
+
+    val packaging = doc.getElementsByTagName("packaging").item(0).textContent
+    artifact.extension = packaging
+    return artifact
 }
 /*
  * Finds the host repository of the artifact and initialises it.
@@ -38,6 +45,7 @@ fun InputStream.resolvePOM(): List<Artifact> {
     val dependencies = doc.getElementsByTagName("dependencies").item(0) as Element?
         ?: return artifacts
     val dependencyElements = dependencies.getElementsByTagName("dependency")
+    val packaging = dependencies.getElementsByTagName("packaging").item(0).textContent
     for (i in 0 until dependencyElements.length) {
         val dependencyElement = dependencyElements.item(i) as Element
         val scopeItem = dependencyElement.getElementsByTagName("scope").item(0)
@@ -53,7 +61,7 @@ fun InputStream.resolvePOM(): List<Artifact> {
         if (artifactId.endsWith("bom")) {
             continue
         }
-        val artifact = Artifact(groupId, artifactId)
+        val artifact = Artifact(groupId, artifactId, extension=packaging)
         initHost(artifact)
         if (artifact.repository == null) {
             continue

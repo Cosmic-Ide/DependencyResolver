@@ -11,7 +11,8 @@ data class Artifact(
     val groupId: String,
     val artifactId: String,
     var version: String = "",
-    var repository: Repository? = null
+    var repository: Repository? = null,
+    val extension: String = "jar"
 ) {
     private fun downloadTo(output: File) {
         if (repository == null) {
@@ -19,7 +20,7 @@ data class Artifact(
         }
         output.createNewFile()
         val dependencyUrl =
-            "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version.jar"
+            "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version" + "." + extension
         val stream = URL(dependencyUrl).openConnection().inputStream
         output.outputStream().use { stream.copyTo(it) }
     }
@@ -34,7 +35,7 @@ data class Artifact(
 
         latestDeps.forEach { art ->
             if (art.version.isNotEmpty() && art.repository != null) {
-                art.downloadTo(File(output, "${ art.artifactId }-${ art.version }.jar"))
+                art.downloadTo(File(output, "${ art.artifactId }-${ art.version }" + "." + extension))
             }
         }
     }
