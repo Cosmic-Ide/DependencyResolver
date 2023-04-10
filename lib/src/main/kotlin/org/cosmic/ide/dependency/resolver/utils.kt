@@ -12,7 +12,7 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact?
     val artifact = initHost(Artifact(groupId, artifactId, version))
     val factory = DocumentBuilderFactory.newInstance()
     val builder = factory.newDocumentBuilder()
-    val doc = builder.parse(artifact.getPOM()!!)
+    val doc = builder.parse(artifact?.getPOM()!!)
 
     val packaging = doc.getElementsByTagName("packaging").item(0).textContent
     artifact.extension = packaging

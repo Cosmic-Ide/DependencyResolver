@@ -12,7 +12,7 @@ data class Artifact(
     val artifactId: String,
     var version: String = "",
     var repository: Repository? = null,
-    val extension: String = "jar"
+    var extension: String = "jar"
 ) {
     private fun downloadTo(output: File) {
         if (repository == null) {
