@@ -1,8 +1,18 @@
+/*
+ *
+ *  * This file is part of Cosmic IDE.
+ *  * Cosmic IDE is a free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+ *  * Cosmic IDE is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ *  * You should have received a copy of the GNU General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>.
+ *
+ *
+ */
+
 package org.cosmic.ide.dependency.resolver.api
 
+import org.cosmic.ide.dependency.resolver.logger
 import org.cosmic.ide.dependency.resolver.resolvePOM
 import java.io.File
-import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.net.URL
 import javax.xml.parsers.DocumentBuilderFactory
@@ -21,6 +31,7 @@ data class Artifact(
         output.createNewFile()
         val dependencyUrl =
             "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version" + "." + extension
+        logger.info("Downloading $dependencyUrl")
         val stream = URL(dependencyUrl).openConnection().inputStream
         output.outputStream().use { stream.copyTo(it) }
     }
@@ -46,7 +57,7 @@ data class Artifact(
         val artifacts = mutableListOf<Artifact>()
         deps.forEach { dep ->
             if (dep.version.isEmpty()) {
-                println("Fetching latest version of ${ dep.artifactId }")
+                logger.info("Fetching latest version of ${dep.artifactId}")
                 val meta = URL("${ dep.repository!!.getURL() }/${ dep.groupId.replace(".", "/") }/${ dep.artifactId }/maven-metadata.xml").openConnection().inputStream
                 val factory = DocumentBuilderFactory.newInstance()
                 val builder = factory.newDocumentBuilder()
@@ -54,6 +65,7 @@ data class Artifact(
                 val v = doc.getElementsByTagName("release").item(0)
                 if (v != null) {
                     dep.version = v.textContent
+                    logger.info("Latest version of ${dep.groupId}:${dep.artifactId} is ${dep.version}")
                 }
             }
             artifacts.add(dep)
@@ -67,11 +79,10 @@ data class Artifact(
             return ""
         }
         val dependencyUrl =
-            "${ repository?.getURL() }/${ groupId.replace(".", "/") }/${ artifactId }/maven-metadata.xml"
-        val contents = URL(dependencyUrl).readText()
-        return contents
+            "${repository?.getURL()}/${groupId.replace(".", "/")}/${artifactId}/maven-metadata.xml"
+        return URL(dependencyUrl).readText()
     }
-    
+
 
     fun getPOM(): InputStream? {
         val pomUrl =
