@@ -26,8 +26,8 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact 
     val builder = factory.newDocumentBuilder()
     val doc = builder.parse(artifact?.getPOM()!!)
 
-    val packaging = doc.getElementsByTagName("packaging").item(0).textContent
-    artifact.extension = packaging
+    val packaging = doc.getElementsByTagName("packaging").item(0)
+    if (packaging != null) artifact.extension = packaging.textContent
     return artifact
 }
 
