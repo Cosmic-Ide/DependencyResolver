@@ -59,7 +59,8 @@ fun InputStream.resolvePOM(): List<Artifact> {
     val dependencies = doc.getElementsByTagName("dependencies").item(0) as Element?
         ?: return artifacts
     val dependencyElements = dependencies.getElementsByTagName("dependency")
-    val packaging = dependencies.getElementsByTagName("packaging").item(0).textContent
+    val el = dependencies.getElementsByTagName("packaging").item(0)
+    val packaging = if (el == null) "jar" else el.textContent
     for (i in 0 until dependencyElements.length) {
         val dependencyElement = dependencyElements.item(i) as Element
         val scopeItem = dependencyElement.getElementsByTagName("scope").item(0)
