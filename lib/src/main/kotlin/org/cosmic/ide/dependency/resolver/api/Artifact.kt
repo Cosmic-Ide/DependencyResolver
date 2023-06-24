@@ -56,6 +56,7 @@ data class Artifact(
         val deps = pom.resolvePOM()
         val artifacts = mutableListOf<Artifact>()
         deps.forEach { dep ->
+            logger.info("Resolving ${dep.groupId}:${dep.artifactId}")
             if (dep.version.isEmpty()) {
                 logger.info("Fetching latest version of ${dep.artifactId}")
                 val meta = URL("${ dep.repository!!.getURL() }/${ dep.groupId.replace(".", "/") }/${ dep.artifactId }/maven-metadata.xml").openConnection().inputStream
@@ -68,6 +69,7 @@ data class Artifact(
                     logger.info("Latest version of ${dep.groupId}:${dep.artifactId} is ${dep.version}")
                 }
             }
+            logger.info("Resolved ${dep.groupId}:${dep.artifactId}")
             artifacts.add(dep)
             artifacts.addAll(dep.resolve())
         }
