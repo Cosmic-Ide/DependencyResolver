@@ -24,7 +24,7 @@ data class Artifact(
     var repository: Repository? = null,
     var extension: String = "jar"
 ) {
-    private fun downloadTo(output: File) {
+    fun downloadTo(output: File) {
         if (repository == null) {
             throw IllegalStateException("Repository is not declared.")
         }
