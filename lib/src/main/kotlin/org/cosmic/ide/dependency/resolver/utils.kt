@@ -37,7 +37,7 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact 
  */
 fun initHost(artifact: Artifact): Artifact? {
     for (repository in repositories) {
-        if (repository.checkExists(artifact.groupId, artifact.artifactId)) {
+        if (repository.checkExists(artifact)) {
             logger.info("Found ${artifact.artifactId} in ${repository.getName()}")
             artifact.repository = repository
             return artifact
