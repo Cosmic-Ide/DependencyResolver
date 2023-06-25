@@ -20,8 +20,9 @@ import java.util.logging.Logger
 val repositories = mutableListOf(MavenCentral(), Jitpack(), GoogleMaven())
 val logger = Logger.getAnonymousLogger()
 
-fun getArtifact(groupId: String, artifactId: String, version: String): Artifact {
+fun getArtifact(groupId: String, artifactId: String, version: String): Artifact? {
     val artifact = initHost(Artifact(groupId, artifactId, version))
+    if (artifact == null) return null
     val factory = DocumentBuilderFactory.newInstance()
     val builder = factory.newDocumentBuilder()
     val doc = builder.parse(artifact?.getPOM()!!)
