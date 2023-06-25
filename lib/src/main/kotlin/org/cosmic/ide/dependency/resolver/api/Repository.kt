@@ -16,19 +16,19 @@ import java.net.URL
 
 interface Repository {
 
-    fun checkExists(groupId: String, artifactId: String): Boolean {
+    fun checkExists(artifact: Artifact): Boolean {
         val repository = getURL()
         val dependencyUrl =
-            "$repository/${groupId.replace(".", "/")}/$artifactId/maven-metadata.xml"
+            "$repository/${artifact.groupId.replace(".", "/")}/${artifact.artifactId}/maven-metadata.xml"
         val url = URL(dependencyUrl)
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "HEAD"
-        val responseCode = connection.responseCode == 200
-        return responseCode
-    }
-
-    fun checkExists(artifact: Artifact): Boolean {
-        return checkExists(artifact.groupId, artifact.artifactId)
+        val isArtifactAvailable = connection.responseCode == 200
+        if (isArtifactAvailable) {
+            // Check if the version is available
+            return url.readText().contains(artifact.version)
+        }
+        return false
     }
 
     fun getName(): String
