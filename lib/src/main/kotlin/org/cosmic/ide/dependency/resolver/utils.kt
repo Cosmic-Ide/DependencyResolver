@@ -13,11 +13,15 @@ package org.cosmic.ide.dependency.resolver
 import java.io.InputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import org.cosmic.ide.dependency.resolver.api.Artifact
+import org.cosmic.ide.dependency.resolver.api.Repository
 import org.cosmic.ide.dependency.resolver.repository.*
 import org.w3c.dom.Element
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.logging.Logger
 
-val repositories = mutableListOf(MavenCentral(), Jitpack(), GoogleMaven())
+val repositories = ConcurrentLinkedQueue<Repository>().apply {
+    addAll(listOf(MavenCentral(), Jitpack(), GoogleMaven()))
+}
 val logger = Logger.getAnonymousLogger()
 
 fun getArtifact(groupId: String, artifactId: String, version: String): Artifact? {
