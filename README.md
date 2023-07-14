@@ -3,6 +3,8 @@
 Provides a simple API to check for, and download artifacts from Maven Central, Google Maven and Jitpack.
 It was created as a lightweight alternative to Eclipse aether for Android. But this would work on any OS.
 
+It is recommended to use snapshot builds from jitpack.
+
 For checking if an artifact exists (in the above mentioned repositories), you can simply do
 ```kt
 import org.cosmic.ide.dependency.resolver.getArtifact
