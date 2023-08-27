@@ -10,7 +10,6 @@
 
 package org.cosmic.ide.dependency.resolver.api
 
-import org.cosmic.ide.dependency.resolver.logger
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -23,6 +22,11 @@ interface Repository {
         val url = URL(dependencyUrl)
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "HEAD"
+        try {
+            connection.connect()
+        } catch (e: Exception) {
+            return false
+        }
         val isArtifactAvailable = connection.responseCode == 200
         if (isArtifactAvailable) {
             // Check if the version is available

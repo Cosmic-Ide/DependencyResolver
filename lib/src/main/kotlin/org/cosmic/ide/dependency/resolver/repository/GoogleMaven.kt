@@ -19,6 +19,6 @@ class GoogleMaven : Repository {
     }
 
     override fun getURL(): String {
-        return "https://dl.google.com/android/maven2"
+        return "https://maven.google.com"
     }
 }

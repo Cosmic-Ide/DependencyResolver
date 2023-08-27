@@ -10,26 +10,30 @@
 
 package org.cosmic.ide.dependency.resolver
 
-import java.io.InputStream
-import javax.xml.parsers.DocumentBuilderFactory
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import org.cosmic.ide.dependency.resolver.api.Artifact
 import org.cosmic.ide.dependency.resolver.api.Repository
-import org.cosmic.ide.dependency.resolver.repository.*
+import org.cosmic.ide.dependency.resolver.repository.GoogleMaven
+import org.cosmic.ide.dependency.resolver.repository.Jitpack
+import org.cosmic.ide.dependency.resolver.repository.MavenCentral
+import org.cosmic.ide.dependency.resolver.repository.SonatypeSnapshots
 import org.w3c.dom.Element
+import java.io.InputStream
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.logging.Logger
+import javax.xml.parsers.DocumentBuilderFactory
 
 val repositories = ConcurrentLinkedQueue<Repository>().apply {
-    addAll(listOf(MavenCentral(), Jitpack(), GoogleMaven()))
+    addAll(listOf(MavenCentral(), Jitpack(), GoogleMaven(), SonatypeSnapshots()))
 }
-val logger = Logger.getAnonymousLogger()
+val logger: Logger = Logger.getLogger("DependencyResolver")
 
 fun getArtifact(groupId: String, artifactId: String, version: String): Artifact? {
-    val artifact = initHost(Artifact(groupId, artifactId, version))
-    if (artifact == null) return null
+    val artifact = initHost(Artifact(groupId, artifactId, version)) ?: return null
     val factory = DocumentBuilderFactory.newInstance()
     val builder = factory.newDocumentBuilder()
-    val doc = builder.parse(artifact?.getPOM()!!)
+    val doc = builder.parse(artifact.getPOM()!!)
 
     val packaging = doc.getElementsByTagName("packaging").item(0)
     if (packaging != null) artifact.extension = packaging.textContent
@@ -43,7 +47,7 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact?
 fun initHost(artifact: Artifact): Artifact? {
     for (repository in repositories) {
         if (repository.checkExists(artifact)) {
-            logger.info("Found ${artifact.artifactId} in ${repository.getName()}")
+            logger.info("Found ${artifact.groupId + ":" + artifact.artifactId} in ${repository.getName()}")
             artifact.repository = repository
             return artifact
         }
@@ -55,41 +59,54 @@ fun initHost(artifact: Artifact): Artifact? {
 /*
  * Resolves a POM file from InputStream and returns the list of artifacts it depends on.
  */
-fun InputStream.resolvePOM(): List<Artifact> {
-    val artifacts = mutableListOf<Artifact>()
+suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): ConcurrentLinkedQueue<Artifact> {
+    val artifacts = ConcurrentLinkedQueue<Artifact>()
     val factory = DocumentBuilderFactory.newInstance()
     val builder = factory.newDocumentBuilder()
     val doc = builder.parse(this)
 
-    val dependencies = doc.getElementsByTagName("dependencies").item(0) as Element?
-        ?: return artifacts
+    val elem = doc.getElementsByTagName("dependencies")
+    if (elem.length == 0) {
+        logger.fine("No dependencies found")
+        return artifacts
+    }
+    val dependencies = elem.item(elem.length - 1) as Element
+
     val dependencyElements = dependencies.getElementsByTagName("dependency")
-    val el = dependencies.getElementsByTagName("packaging").item(0)
-    val packaging = if (el == null) "jar" else el.textContent
+
+    val items = mutableListOf<Int>()
     for (i in 0 until dependencyElements.length) {
+        items.add(i)
+    }
+    items.parallelForEach { i ->
         val dependencyElement = dependencyElements.item(i) as Element
         val scopeItem = dependencyElement.getElementsByTagName("scope").item(0)
         if (scopeItem != null) {
             val scope = scopeItem.textContent
             // if scope is test/provided, there is no need to download them
             if (scope.isNotEmpty() && (scope == "test" || scope == "provided")) {
-                continue
+                return@parallelForEach
             }
         }
         val groupId = dependencyElement.getElementsByTagName("groupId").item(0).textContent
         val artifactId = dependencyElement.getElementsByTagName("artifactId").item(0).textContent
         if (artifactId.endsWith("bom")) {
             // TODO: handle versions from BOMs
-            continue
+            return@parallelForEach
         }
-        val artifact = Artifact(groupId, artifactId, extension=packaging)
+        val item = dependencyElement.getElementsByTagName("version").item(0)
+
+        if (resolved.any { it.groupId == groupId && it.artifactId == artifactId && it.version >= item.textContent }) {
+            logger.info("Skipping $groupId:$artifactId as it is already resolved.")
+            return@parallelForEach
+        }
+        val artifact = Artifact(groupId, artifactId)
         initHost(artifact)
         if (artifact.repository == null) {
-            continue
+            return@parallelForEach
         }
 
         val metadata = artifact.getMavenMetadata()
-        val item = dependencyElement.getElementsByTagName("version").item(0)
         if (item != null) {
             var version = item.textContent
             // Some libraries define an array of compatible dependency versions.
@@ -105,13 +122,30 @@ fun InputStream.resolvePOM(): List<Artifact> {
                         version = v
                     }
                 }
-                if (version.contains("[")) {
-                    continue
+            }
+            if (version == "+") {
+                // The latest version will be fetched later in resolve()
+                version = ""
+            }
+            if (version.startsWith("\${")) {
+                val tagName = version.substring(2, version.length - 1)
+                val tag = doc.getElementsByTagName(tagName).item(0)
+                if (tag == null) {
+                    logger.info("$artifactId has no version tag $tagName")
+                    return@parallelForEach
                 }
+                version = tag.textContent
             }
             artifact.version = version
         }
         artifacts.add(artifact)
     }
     return artifacts
+}
+
+
+suspend fun <T> Iterable<T>.parallelForEach(action: suspend (T) -> Unit) = coroutineScope {
+    forEach { element ->
+        launch { action(element) }
+    }
 }

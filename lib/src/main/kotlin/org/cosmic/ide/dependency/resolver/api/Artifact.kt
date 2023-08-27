@@ -11,10 +11,13 @@
 package org.cosmic.ide.dependency.resolver.api
 
 import org.cosmic.ide.dependency.resolver.logger
+import org.cosmic.ide.dependency.resolver.parallelForEach
 import org.cosmic.ide.dependency.resolver.resolvePOM
 import java.io.File
 import java.io.InputStream
+import java.net.SocketException
 import java.net.URL
+import java.util.concurrent.ConcurrentLinkedQueue
 import javax.xml.parsers.DocumentBuilderFactory
 
 data class Artifact(
@@ -32,46 +35,63 @@ data class Artifact(
         val dependencyUrl =
             "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version" + "." + extension
         logger.info("Downloading $dependencyUrl")
-        val stream = URL(dependencyUrl).openConnection().inputStream
-        output.outputStream().use { stream.copyTo(it) }
+        try {
+            val stream = URL(dependencyUrl).openConnection().apply { connectTimeout = 2000; readTimeout = 5000 }.inputStream
+            output.outputStream().use { stream.copyTo(it) }
+        } catch (e: SocketException) {
+            downloadTo(output)
+        }
     }
 
-    fun downloadArtifact(output: File) {
+    suspend fun downloadArtifact(output: File) {
         output.mkdirs()
         val artifacts = resolve()
         artifacts.add(this)
 
         val latestDeps =
-            artifacts.groupBy { it.groupId to it.artifactId }.values.map { artifact -> artifact.maxBy { it.version } }
+            ConcurrentLinkedQueue(artifacts.groupBy { it.groupId to it.artifactId }.values.map { artifact -> artifact.maxBy { it.version } })
 
-        latestDeps.forEach { art ->
+        latestDeps.parallelForEach { art ->
+            val pom = art.getPOM()
+            if (pom != null) {
+                val factory = DocumentBuilderFactory.newInstance()
+                val builder = factory.newDocumentBuilder()
+                val doc = builder.parse(pom)
+                val packaging = doc.getElementsByTagName("packaging").item(0)
+                if (packaging != null) art.extension = packaging.textContent
+            }
             if (art.version.isNotEmpty() && art.repository != null) {
                 art.downloadTo(File(output, "${ art.artifactId }-${ art.version }" + "." + extension))
             }
         }
     }
 
-    fun resolve(): MutableList<Artifact> {
-        val pom = getPOM() ?: return mutableListOf()
-        val deps = pom.resolvePOM()
-        val artifacts = mutableListOf<Artifact>()
-        deps.forEach { dep ->
-            println("Resolving ${dep.groupId}:${dep.artifactId}")
-            if (dep.version.isEmpty()) {
+    suspend fun resolve(resolved: ConcurrentLinkedQueue<Artifact> = ConcurrentLinkedQueue()): ConcurrentLinkedQueue<Artifact> {
+        val pom = getPOM() ?: return ConcurrentLinkedQueue()
+        val deps = ConcurrentLinkedQueue(pom.resolvePOM(resolved))
+        val artifacts = ConcurrentLinkedQueue<Artifact>()
+        deps.parallelForEach { dep ->
+            logger.fine("Resolving $dep from $this")
+            if (dep.version.isBlank()) {
                 logger.info("Fetching latest version of ${dep.artifactId}")
-                val meta = URL("${ dep.repository!!.getURL() }/${ dep.groupId.replace(".", "/") }/${ dep.artifactId }/maven-metadata.xml").openConnection().inputStream
                 val factory = DocumentBuilderFactory.newInstance()
                 val builder = factory.newDocumentBuilder()
-                val doc = builder.parse(meta)
+                val doc = builder.parse(dep.getMavenMetadata().byteInputStream())
                 val v = doc.getElementsByTagName("release").item(0)
                 if (v != null) {
                     dep.version = v.textContent
-                    logger.info("Latest version of ${dep.groupId}:${dep.artifactId} is ${dep.version}")
+                    logger.info("Latest version of ${dep.groupId}:${dep.artifactId} is ${v.textContent}")
                 }
             }
-            println("Resolved ${dep.groupId}:${dep.artifactId}")
             artifacts.add(dep)
-            artifacts.addAll(dep.resolve())
+            if (resolved.any { it.groupId == dep.groupId && it.artifactId == dep.artifactId && it.version >= dep.version }) {
+                return@parallelForEach
+            }
+            resolved.add(dep)
+            val depArtifacts = dep.resolve(resolved)
+            logger.info("Resolved $dep")
+            resolved.addAll(depArtifacts)
+            artifacts.addAll(depArtifacts)
         }
         return artifacts
     }
@@ -82,7 +102,7 @@ data class Artifact(
         }
         val dependencyUrl =
             "${repository?.getURL()}/${groupId.replace(".", "/")}/${artifactId}/maven-metadata.xml"
-        return URL(dependencyUrl).readText()
+        return URL(dependencyUrl).openConnection().apply { connectTimeout = 2000; readTimeout = 5000 }.inputStream.bufferedReader().readText()
     }
 
 
@@ -90,8 +110,17 @@ data class Artifact(
         val pomUrl =
             "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version.pom"
         if (version.isNotEmpty()) {
-            return URL(pomUrl).openConnection().inputStream
+            return try {
+                URL(pomUrl).openConnection()
+                    .apply { connectTimeout = 5000; readTimeout = 2000 }.inputStream
+            } catch (e: SocketException) {
+                getPOM()
+            }
         }
         return null
+    }
+
+    override fun toString(): String {
+        return "$groupId:$artifactId:$version"
     }
 }
