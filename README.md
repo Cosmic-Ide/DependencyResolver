@@ -5,6 +5,8 @@ It was created as a lightweight alternative to Eclipse aether for Android. But t
 
 It is recommended to use snapshot builds from jitpack.
 
+For a proper example, checkout Main.kt.
+
 For checking if an artifact exists (in the above mentioned repositories), you can simply do
 ```kt
 import org.cosmic.ide.dependency.resolver.getArtifact
@@ -21,6 +23,7 @@ if (repository != null) {
     println("Cannot find artifact.")
 }
 ```
+
 NOTE: If you only want to download the artifact, you can use the `downloadTo` method instead.
 For downloading an artifact with all of its dependencies, you can do
 ```kt
