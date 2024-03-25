@@ -8,12 +8,11 @@
  *
  */
 
-import org.jetbrains.kotlin.gradle.dsl.KotlinCompile
-
 plugins {
     id("org.jetbrains.kotlin.jvm") version "1.8.21"
     id("java-library")
     id("maven-publish")
+    application
 }
 
 repositories {
@@ -40,6 +39,10 @@ publishing {
             from(components["java"])
         }
     }
+}
+
+application {
+    mainClass.set("org.cosmic.ide.dependency.resolver.MainKt")
 }
 
 dependencies {

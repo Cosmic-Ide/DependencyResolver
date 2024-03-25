@@ -8,14 +8,14 @@
  */
 
 package org.cosmic.ide.dependency.resolver.api
-
-import org.cosmic.ide.dependency.resolver.logger
+import org.cosmic.ide.dependency.resolver.eventReciever
 import org.cosmic.ide.dependency.resolver.parallelForEach
 import org.cosmic.ide.dependency.resolver.resolvePOM
 import java.io.File
 import java.io.InputStream
 import java.net.SocketException
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -26,29 +26,13 @@ data class Artifact(
     var repository: Repository? = null,
     var extension: String = "jar"
 ) {
-    fun downloadTo(output: File) {
-        if (repository == null) {
-            throw IllegalStateException("Repository is not declared.")
-        }
-        output.createNewFile()
-        val dependencyUrl =
-            "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version" + "." + if (extension == "bundle") "jar" else extension
-        logger.info("Downloading $dependencyUrl")
-        try {
-            val stream = URL(dependencyUrl).openConnection().apply { connectTimeout = 2000; readTimeout = 5000 }.inputStream
-            output.outputStream().use { stream.copyTo(it) }
-        } catch (e: SocketException) {
-            downloadTo(output)
-        }
-    }
-
     suspend fun downloadArtifact(output: File) {
         output.mkdirs()
         val artifacts = resolve()
         artifacts.add(this)
 
         val latestDeps =
-            ConcurrentLinkedQueue(artifacts.groupBy { it.groupId to it.artifactId }.values.map { artifact -> artifact.maxBy { it.version } })
+            ConcurrentLinkedQueue(artifacts.groupBy { it.groupId to it.artifactId }.values.map { artifact -> artifact.maxByOrNull { it.version } }.filterNotNull())
 
         latestDeps.parallelForEach { art ->
             val pom = art.getPOM()
@@ -60,26 +44,26 @@ data class Artifact(
                 if (packaging != null) art.extension = packaging.textContent
             }
             if (art.version.isNotEmpty() && art.repository != null) {
-                art.downloadTo(File(output, "${ art.artifactId }-${ art.version }" + "." + extension))
+                art.downloadTo(File(output, "${art.artifactId}-${art.version}.$extension"))
             }
         }
     }
 
-    suspend fun resolve(resolved: ConcurrentLinkedQueue<Artifact> = ConcurrentLinkedQueue()): ConcurrentLinkedQueue<Artifact> {
+    suspend fun resolve(resolved: MutableSet<Artifact> = ConcurrentHashMap.newKeySet()): ConcurrentLinkedQueue<Artifact> {
         val pom = getPOM() ?: return ConcurrentLinkedQueue()
-        val deps = ConcurrentLinkedQueue(pom.resolvePOM(resolved))
+        val deps = ConcurrentLinkedQueue(pom.resolvePOM(ConcurrentLinkedQueue(resolved)))
         val artifacts = ConcurrentLinkedQueue<Artifact>()
         deps.parallelForEach { dep ->
-            logger.fine("Resolving $dep from $this")
+            eventReciever.onResolving(this, dep)
             if (dep.version.isBlank()) {
-                logger.info("Fetching latest version of ${dep.artifactId}")
+                eventReciever.onFetchingLatestVersion(dep)
                 val factory = DocumentBuilderFactory.newInstance()
                 val builder = factory.newDocumentBuilder()
                 val doc = builder.parse(dep.getMavenMetadata().byteInputStream())
                 val v = doc.getElementsByTagName("release").item(0)
                 if (v != null) {
                     dep.version = v.textContent
-                    logger.info("Latest version of ${dep.groupId}:${dep.artifactId} is ${v.textContent}")
+                    eventReciever.onFetchedLatestVersion(dep, dep.version)
                 }
             }
             artifacts.add(dep)
@@ -88,11 +72,30 @@ data class Artifact(
             }
             resolved.add(dep)
             val depArtifacts = dep.resolve(resolved)
-            logger.info("Resolved $dep")
+            eventReciever.onResolutionComplete(dep)
             resolved.addAll(depArtifacts)
             artifacts.addAll(depArtifacts)
         }
         return artifacts
+    }
+
+    fun downloadTo(output: File) {
+        if (repository == null) {
+            throw IllegalStateException("Repository is not declared.")
+        }
+        output.createNewFile()
+        val dependencyUrl =
+            "${repository!!.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.$extension"
+        eventReciever.onDownloadStart(this)
+        try {
+            val stream = URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 2000 }.inputStream
+            output.outputStream().use { stream.copyTo(it) }
+            eventReciever.onDownloadEnd(this)
+        } catch (e: SocketException) {
+            downloadTo(output)
+        } catch (e: Exception) {
+            eventReciever.onDownloadError(this, e)
+        }
     }
 
     fun getMavenMetadata(): String {
@@ -100,14 +103,13 @@ data class Artifact(
             return ""
         }
         val dependencyUrl =
-            "${repository?.getURL()}/${groupId.replace(".", "/")}/${artifactId}/maven-metadata.xml"
-        return URL(dependencyUrl).openConnection().apply { connectTimeout = 2000; readTimeout = 5000 }.inputStream.bufferedReader().readText()
+            "${repository?.getURL()}/${groupId.replace(".", "/")}/$artifactId/maven-metadata.xml"
+        return URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 2000 }.inputStream.bufferedReader().readText()
     }
-
 
     fun getPOM(): InputStream? {
         val pomUrl =
-            "${ repository!!.getURL() }/${ groupId.replace(".", "/") }/$artifactId/$version/$artifactId-$version.pom"
+            "${repository!!.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.pom"
         if (version.isNotEmpty()) {
             return try {
                 URL(pomUrl).openConnection()
