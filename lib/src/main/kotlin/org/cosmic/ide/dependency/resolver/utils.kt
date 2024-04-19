@@ -81,7 +81,7 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
             if (scopeItem != null) {
                 val scope = scopeItem.textContent
                 if (scope.isNotEmpty() && (scope == "test" || scope == "provided")) {
-                    eventReciever.onInvalidScope(Artifact(dependencyElement.getElementsByTagName("groupId").item(0).textContent, dependencyElement.getElementsByTagName("artifactId").item(0).textContent, dependencyElement.getElementsByTagName("version").item(0).textContent), scope)
+                    eventReciever.onInvalidScope(Artifact(dependencyElement.getElementsByTagName("groupId").item(0)?.textContent ?: "", dependencyElement.getElementsByTagName("artifactId").item(0)?.textContent ?: "", dependencyElement.getElementsByTagName("version").item(0)?.textContent ?: ""), scope)
                     return@async
                 }
             }

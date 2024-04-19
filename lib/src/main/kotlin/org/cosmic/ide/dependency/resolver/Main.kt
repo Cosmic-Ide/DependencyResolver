@@ -6,7 +6,7 @@ import kotlin.time.measureTime
 
 @OptIn(ExperimentalTime::class)
 suspend fun main() {
-    val artifact = getArtifact("com.google.android.material", "material", "1.12.0-beta01")
+    val artifact = getArtifact("dev.kord", "kord-core", "0.13.1")
     val dir = File("test")
     dir.deleteRecursively()
     dir.mkdir()
