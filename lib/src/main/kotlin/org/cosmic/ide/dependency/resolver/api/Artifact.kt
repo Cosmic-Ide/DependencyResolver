@@ -15,7 +15,6 @@ import java.io.File
 import java.io.InputStream
 import java.net.SocketException
 import java.net.URL
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -49,27 +48,24 @@ data class Artifact(
         }
     }
 
-    suspend fun resolve(resolved: MutableSet<Artifact> = ConcurrentHashMap.newKeySet()): ConcurrentLinkedQueue<Artifact> {
+    suspend fun resolve(resolved: ConcurrentLinkedQueue<Artifact> = ConcurrentLinkedQueue<Artifact>()): ConcurrentLinkedQueue<Artifact> {
         val pom = getPOM() ?: return ConcurrentLinkedQueue()
-        val deps = ConcurrentLinkedQueue(pom.resolvePOM(ConcurrentLinkedQueue(resolved)))
+        val deps = ConcurrentLinkedQueue(pom.resolvePOM(resolved))
         val artifacts = ConcurrentLinkedQueue<Artifact>()
         deps.parallelForEach { dep ->
             eventReciever.onResolving(this, dep)
-            if (dep.version.isBlank()) {
-                eventReciever.onFetchingLatestVersion(dep)
-                val factory = DocumentBuilderFactory.newInstance()
-                val builder = factory.newDocumentBuilder()
-                val doc = builder.parse(dep.getMavenMetadata().byteInputStream())
-                val v = doc.getElementsByTagName("release").item(0)
-                if (v != null) {
-                    dep.version = v.textContent
-                    eventReciever.onFetchedLatestVersion(dep, dep.version)
+
+            val saved = resolved.find { it.groupId == dep.groupId && it.artifactId == dep.artifactId }
+
+            if (saved != null) {
+                val max = listOf(saved.version, dep.version).maxOrNull()
+                if (saved.version != max) {
+                    println("Updating max of ${saved.version} to $max")
+                    saved.version = max ?: ""
                 }
-            }
-            artifacts.add(dep)
-            if (resolved.any { it.groupId == dep.groupId && it.artifactId == dep.artifactId && it.version >= dep.version }) {
                 return@parallelForEach
             }
+            artifacts.add(dep)
             resolved.add(dep)
             val depArtifacts = dep.resolve(resolved)
             eventReciever.onResolutionComplete(dep)

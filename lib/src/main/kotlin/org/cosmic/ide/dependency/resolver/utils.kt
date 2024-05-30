@@ -92,7 +92,14 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
             }
             val item = dependencyElement.getElementsByTagName("version").item(0)?.textContent ?: ""
 
-            if (resolved.any { it.groupId == groupId && it.artifactId == artifactId && it.version >= item }) {
+            if (resolved.any { it.groupId == groupId && it.artifactId == artifactId }) {
+                val found = resolved.find { it.groupId == groupId && it.artifactId == artifactId }!!
+
+                if (found.version.isBlank() && item.isNotBlank()) {
+                    found.version = item
+                } else {
+                    found.version = listOf(found.version, item).maxOrNull() ?: ""
+                }
                 eventReciever.onSkippingResolution(Artifact(groupId, artifactId, item))
                 return@async
             }
@@ -125,6 +132,17 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
                     return@async
                 }
                 version = tag.textContent
+            }
+
+            if (version.isBlank()) {
+                eventReciever.onFetchingLatestVersion(artifact)
+                val factory = DocumentBuilderFactory.newInstance()
+                val builder = factory.newDocumentBuilder()
+                val doc = builder.parse(metadata.byteInputStream())
+                val v = doc.getElementsByTagName("release").item(0)
+                if (v != null) {
+                    version = v.textContent
+                }
             }
             artifact.version = version
             artifacts.add(artifact)
