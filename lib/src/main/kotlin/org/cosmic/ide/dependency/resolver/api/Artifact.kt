@@ -84,7 +84,7 @@ data class Artifact(
             "${repository!!.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.$extension"
         eventReciever.onDownloadStart(this)
         try {
-            val stream = URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 2000 }.inputStream
+            val stream = URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream
             output.outputStream().use { stream.copyTo(it) }
             eventReciever.onDownloadEnd(this)
         } catch (e: SocketException) {
@@ -100,7 +100,7 @@ data class Artifact(
         }
         val dependencyUrl =
             "${repository?.getURL()}/${groupId.replace(".", "/")}/$artifactId/maven-metadata.xml"
-        return URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 2000 }.inputStream.bufferedReader().readText()
+        return URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream.bufferedReader().readText()
     }
 
     fun getPOM(): InputStream? {
@@ -109,7 +109,7 @@ data class Artifact(
         if (version.isNotEmpty()) {
             return try {
                 URL(pomUrl).openConnection()
-                    .apply { connectTimeout = 5000; readTimeout = 2000 }.inputStream
+                    .apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream
             } catch (e: SocketException) {
                 getPOM()
             }
