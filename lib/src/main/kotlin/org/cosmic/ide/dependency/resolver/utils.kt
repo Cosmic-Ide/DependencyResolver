@@ -98,7 +98,7 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
                 if (found.version.isBlank() && item.isNotBlank()) {
                     found.version = item
                 } else {
-                    found.version = listOf(found.version, item).maxOrNull() ?: ""
+                    found.version = listOf(found.version, if (item.startsWith("[")) item.substring(1, item.length) else item).maxOrNull() ?: ""
                 }
                 eventReciever.onSkippingResolution(Artifact(groupId, artifactId, item))
                 return@async
