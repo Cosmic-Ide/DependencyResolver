@@ -19,8 +19,8 @@ import org.cosmic.ide.dependency.resolver.repository.GoogleMaven
 import org.cosmic.ide.dependency.resolver.repository.Jitpack
 import org.cosmic.ide.dependency.resolver.repository.MavenCentral
 import org.cosmic.ide.dependency.resolver.repository.SonatypeSnapshots
+import org.w3c.dom.Document
 import org.w3c.dom.Element
-import java.io.InputStream
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -60,20 +60,16 @@ fun initHost(artifact: Artifact): Artifact? {
 /*
  * Resolves a POM file from InputStream and returns the list of artifacts it depends on.
  */
-suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): ConcurrentLinkedQueue<Artifact> =
+suspend fun Document.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): ConcurrentLinkedQueue<Artifact> =
     coroutineScope {
         val artifacts = ConcurrentLinkedQueue<Artifact>()
-        val factory = DocumentBuilderFactory.newInstance()
-        val builder = factory.newDocumentBuilder()
-        val doc = builder.parse(this@resolvePOM)
-
-        val elem = doc.getElementsByTagName("dependencies")
+        val elem = getElementsByTagName("dependencies")
         if (elem.length == 0) {
             eventReciever.onDependenciesNotFound(
                 Artifact(
-                    doc.getElementsByTagName("groupId").item(0).textContent,
-                    doc.getElementsByTagName("artifactId").item(0).textContent,
-                    doc.getElementsByTagName("version").item(0).textContent
+                    getElementsByTagName("groupId").item(0).textContent,
+                    getElementsByTagName("artifactId").item(0).textContent,
+                    getElementsByTagName("version").item(0).textContent
                 )
             )
             return@coroutineScope artifacts
@@ -91,9 +87,8 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
                     if (scope.isNotEmpty() && (scope == "test" || scope == "provided")) {
                         eventReciever.onInvalidScope(
                             Artifact(
-                                dependencyElement.getElementsByTagName(
-                                    "groupId"
-                                ).item(0)?.textContent ?: "",
+                                dependencyElement.getElementsByTagName("groupId")
+                                    .item(0)?.textContent ?: "",
                                 dependencyElement.getElementsByTagName("artifactId")
                                     .item(0)?.textContent ?: "",
                                 dependencyElement.getElementsByTagName("version")
@@ -115,16 +110,16 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
                 if (resolved.any { it.groupId == groupId && it.artifactId == artifactId }) {
                     val found =
                         resolved.find { it.groupId == groupId && it.artifactId == artifactId }!!
-
-                    if (found.version.isBlank() && item.isNotBlank()) {
-                        found.version = item
+                    val newer = maxOf(
+                        found.version,
+                        if (item.startsWith("[")) getLatestRangeVersion(found, item) else item
+                    )
+                    if (newer != found.version) {
+                        found.resolve(resolved)
+                        found.version = newer
                     } else {
-                        found.version = listOf(
-                            found.version,
-                            if (item.startsWith("[")) getLatestRangeVersion(found, item) else item
-                        ).maxOrNull() ?: ""
+                        eventReciever.onSkippingResolution(Artifact(groupId, artifactId, item))
                     }
-                    eventReciever.onSkippingResolution(Artifact(groupId, artifactId, item))
                     return@async
                 }
 
@@ -143,7 +138,7 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
                 }
                 if (version.startsWith("\${")) {
                     val tagName = version.substring(2, version.length - 1)
-                    val tag = doc.getElementsByTagName(tagName).item(0)
+                    val tag = getElementsByTagName(tagName).item(0)
                     if (tag == null) {
                         eventReciever.onVersionNotFound(artifact)
                         return@async
@@ -161,9 +156,8 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
                         version = v.textContent
                     }
                 }
-                val packaging = doc.getElementsByTagName("packaging").item(0)
-                artifact.extension = packaging?.textContent ?: "jar"
                 artifact.version = version
+
                 artifacts.add(artifact)
             }
         }
@@ -173,10 +167,9 @@ suspend fun InputStream.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): C
 
 fun getLatestRangeVersion(artifact: Artifact, version: String): String {
     if (!version.contains(",")) {
-        return version.substring(1, version.length - 2)
+        return version.substring(1, version.length - 1)
     }
-    val start = version.substring(1, version.indexOf(","))
-    val end = version.substring(version.indexOf(",") + 1, version.length - 1)
+    val (start, end) = version.substring(1, version.length - 1).split(",")
     eventReciever.onFetchingLatestVersion(artifact)
     val factory = DocumentBuilderFactory.newInstance()
     val builder = factory.newDocumentBuilder()

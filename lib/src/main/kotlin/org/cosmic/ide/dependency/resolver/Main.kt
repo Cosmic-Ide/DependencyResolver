@@ -12,9 +12,7 @@ suspend fun main() {
     dir.mkdir()
     val time = measureTime {
         println("Starting...")
-        artifact?.resolve().apply {
-            println(artifact.toString() + " -> " + this?.joinToString(", "))
-        }
+        artifact?.showDependencyTree()
     }
     println("Total time: $time")
 }

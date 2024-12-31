@@ -8,9 +8,11 @@
  */
 
 package org.cosmic.ide.dependency.resolver.api
+
 import okhttp3.Request
-import org.cosmic.ide.dependency.resolver.okHttpClient
 import org.cosmic.ide.dependency.resolver.eventReciever
+import org.cosmic.ide.dependency.resolver.getLatestRangeVersion
+import org.cosmic.ide.dependency.resolver.okHttpClient
 import org.cosmic.ide.dependency.resolver.parallelForEach
 import org.cosmic.ide.dependency.resolver.resolvePOM
 import java.io.File
@@ -29,63 +31,102 @@ data class Artifact(
 ) {
     var mavenMetadata: String = ""
 
+    var dependencies: List<Artifact>? = null
+
     suspend fun downloadArtifact(output: File) {
         output.mkdirs()
-        val artifacts = resolve()
-        artifacts.add(this)
+        if (dependencies == null) {
+            resolve()
+        }
 
-        val latestDeps =
-            ConcurrentLinkedQueue(artifacts.groupBy { it.groupId to it.artifactId }.values.mapNotNull { artifact -> artifact.maxByOrNull { it.version } })
+        val artifacts = getAllDependencies()
+        artifacts.groupBy { it.groupId to it.artifactId }.values.mapNotNull { artifacts ->
+            artifacts.maxByOrNull { it.version }
+        }.forEach { artifact ->
+            artifact.downloadTo(
+                File(
+                    output, "${artifact.artifactId}-${artifact.version}.${artifact.extension}"
+                )
+            )
+        }
+    }
 
-        latestDeps.parallelForEach { art ->
-            val pom = art.getPOM()
-            if (pom != null) {
-                val factory = DocumentBuilderFactory.newInstance()
-                val builder = factory.newDocumentBuilder()
-                val doc = builder.parse(pom)
-                val packaging = doc.getElementsByTagName("packaging").item(0)
-                if (packaging != null) art.extension = packaging.textContent
-            }
-            if (art.version.isNotEmpty() && art.repository != null) {
-                art.downloadTo(File(output, "${art.artifactId}-${art.version}.$extension"))
-            }
+    suspend fun getAllDependencies(): List<Artifact> {
+        if (dependencies == null) {
+            resolve()
+        }
+        val deps = mutableListOf<Artifact>()
+        dependencies!!.forEach { dep ->
+            deps.add(dep)
+            deps.addAll(dep.getAllDependencies())
+        }
+        return deps
+    }
+
+    suspend fun showDependencyTree(depth: Int = 0) {
+        if (dependencies == null) {
+            resolve()
+        }
+        println("    ".repeat(depth) + this)
+        dependencies!!.forEach { dep ->
+            dep.showDependencyTree(depth + 1)
         }
     }
 
     suspend fun resolve(resolved: ConcurrentLinkedQueue<Artifact> = ConcurrentLinkedQueue<Artifact>()): ConcurrentLinkedQueue<Artifact> {
+        if (listOf(resolved.find { it.groupId == groupId && it.artifactId == artifactId }?.version ?: "", version).maxOrNull() != version) {
+            return resolved
+        }
+
         val pom = getPOM() ?: return ConcurrentLinkedQueue()
-        val deps = ConcurrentLinkedQueue(pom.resolvePOM(resolved))
+
+        val factory = DocumentBuilderFactory.newInstance()
+        val builder = factory.newDocumentBuilder()
+        val doc = builder.parse(pom)
+        val packaging = doc.getElementsByTagName("packaging").item(0)
+        if (packaging != null) extension = packaging.textContent
+
+        val deps = doc.resolvePOM(resolved)
         val artifacts = ConcurrentLinkedQueue<Artifact>()
         deps.parallelForEach { dep ->
             eventReciever.onResolving(this, dep)
 
-            val saved = resolved.find { it.groupId == dep.groupId && it.artifactId == dep.artifactId }
+            val saved =
+                resolved.find { it.groupId == dep.groupId && it.artifactId == dep.artifactId }
 
             if (saved != null) {
-                val max = listOf(saved.version, dep.version).maxOrNull()
-                if (saved.version != max) {
-                    println("Updating max of ${saved.version} to $max")
-                    saved.version = max ?: ""
+                val newer = maxOf(
+                    saved.version, if (dep.version.startsWith("[")) getLatestRangeVersion(
+                        saved, dep.version
+                    ) else dep.version
+                )
+                if (newer != saved.version) {
+                    saved.version = newer
+                    saved.resolve(resolved)
+                } else {
+                    eventReciever.onSkippingResolution(dep)
                 }
                 return@parallelForEach
             }
             artifacts.add(dep)
             resolved.add(dep)
-            val depArtifacts = dep.resolve(resolved)
+            dep.resolve(resolved)
             eventReciever.onResolutionComplete(dep)
-            resolved.addAll(depArtifacts)
-            artifacts.addAll(depArtifacts)
         }
-        return artifacts
+        dependencies = artifacts.toList()
+        return resolved
     }
-    
+
     fun downloadTo(output: File) {
         if (repository == null) {
             throw IllegalStateException("Repository is not declared.")
         }
         output.createNewFile()
-        val dependencyUrl =
-            "${repository!!.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.$extension"
+        val dependencyUrl = "${repository!!.getURL()}/${
+            groupId.replace(
+                ".", "/"
+            )
+        }/$artifactId/$version/$artifactId-$version.$extension"
         eventReciever.onDownloadStart(this)
         val request = Request.Builder().url(dependencyUrl).build()
         try {
@@ -108,8 +149,11 @@ data class Artifact(
         if (version.isEmpty()) {
             throw IllegalStateException("Version is not declared.")
         }
-        val pomUrl =
-            "${repository?.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.pom"
+        val pomUrl = "${repository?.getURL()}/${
+            groupId.replace(
+                ".", "/"
+            )
+        }/$artifactId/$version/$artifactId-$version.pom"
 
         val request = Request.Builder().url(pomUrl).build()
         try {
