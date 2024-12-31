@@ -6,13 +6,15 @@ import kotlin.time.measureTime
 
 @OptIn(ExperimentalTime::class)
 suspend fun main() {
-    val artifact = getArtifact("com.onesignal", "OneSignal", "5.1.13")
+    val artifact = getArtifact("com.google.android.material", "material", "1.12.0")
     val dir = File("test")
     dir.deleteRecursively()
     dir.mkdir()
     val time = measureTime {
         println("Starting...")
-        artifact?.resolve()
+        artifact?.resolve().apply {
+            println(artifact.toString() + " -> " + this?.joinToString(", "))
+        }
     }
     println("Total time: $time")
 }

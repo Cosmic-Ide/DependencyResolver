@@ -47,4 +47,5 @@ application {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.3")
+    implementation("com.squareup.okhttp3:okhttp:5.0.0-alpha.14")
 }

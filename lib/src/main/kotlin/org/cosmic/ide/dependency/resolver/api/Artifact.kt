@@ -8,13 +8,15 @@
  */
 
 package org.cosmic.ide.dependency.resolver.api
+import okhttp3.Request
+import org.cosmic.ide.dependency.resolver.okHttpClient
 import org.cosmic.ide.dependency.resolver.eventReciever
 import org.cosmic.ide.dependency.resolver.parallelForEach
 import org.cosmic.ide.dependency.resolver.resolvePOM
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.net.SocketException
-import java.net.URL
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -25,13 +27,15 @@ data class Artifact(
     var repository: Repository? = null,
     var extension: String = "jar"
 ) {
+    var mavenMetadata: String = ""
+
     suspend fun downloadArtifact(output: File) {
         output.mkdirs()
         val artifacts = resolve()
         artifacts.add(this)
 
         val latestDeps =
-            ConcurrentLinkedQueue(artifacts.groupBy { it.groupId to it.artifactId }.values.map { artifact -> artifact.maxByOrNull { it.version } }.filterNotNull())
+            ConcurrentLinkedQueue(artifacts.groupBy { it.groupId to it.artifactId }.values.mapNotNull { artifact -> artifact.maxByOrNull { it.version } })
 
         latestDeps.parallelForEach { art ->
             val pom = art.getPOM()
@@ -74,7 +78,7 @@ data class Artifact(
         }
         return artifacts
     }
-
+    
     fun downloadTo(output: File) {
         if (repository == null) {
             throw IllegalStateException("Repository is not declared.")
@@ -83,36 +87,40 @@ data class Artifact(
         val dependencyUrl =
             "${repository!!.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.$extension"
         eventReciever.onDownloadStart(this)
+        val request = Request.Builder().url(dependencyUrl).build()
         try {
-            val stream = URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream
-            output.outputStream().use { stream.copyTo(it) }
+            okHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("Unexpected code $response")
+                response.body.byteStream().use { input ->
+                    output.outputStream().use { input.copyTo(it) }
+                }
+            }
             eventReciever.onDownloadEnd(this)
-        } catch (e: SocketException) {
-            downloadTo(output)
         } catch (e: Exception) {
             eventReciever.onDownloadError(this, e)
         }
     }
 
-    fun getMavenMetadata(): String {
-        if (repository == null) {
-            return ""
-        }
-        val dependencyUrl =
-            "${repository?.getURL()}/${groupId.replace(".", "/")}/$artifactId/maven-metadata.xml"
-        return URL(dependencyUrl).openConnection().apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream.bufferedReader().readText()
-    }
-
     fun getPOM(): InputStream? {
+        if (repository == null) {
+            throw IllegalStateException("Repository is not declared.")
+        }
+        if (version.isEmpty()) {
+            throw IllegalStateException("Version is not declared.")
+        }
         val pomUrl =
-            "${repository!!.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.pom"
-        if (version.isNotEmpty()) {
-            return try {
-                URL(pomUrl).openConnection()
-                    .apply { connectTimeout = 5000; readTimeout = 8000 }.inputStream
-            } catch (e: SocketException) {
-                getPOM()
-            }
+            "${repository?.getURL()}/${groupId.replace(".", "/")}/$artifactId/$version/$artifactId-$version.pom"
+
+        val request = Request.Builder().url(pomUrl).build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            if (!response.isSuccessful) throw IOException("Unexpected code $response")
+            return response.body.byteStream()
+        } catch (_: SocketException) {
+            eventReciever.onVersionNotFound(this)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            eventReciever.onInvalidPOM(this)
         }
         return null
     }

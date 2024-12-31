@@ -10,29 +10,36 @@
 
 package org.cosmic.ide.dependency.resolver.api
 
-import java.net.HttpURLConnection
-import java.net.URL
+import org.cosmic.ide.dependency.resolver.okHttpClient
 
 interface Repository {
-
     fun checkExists(artifact: Artifact): Boolean {
         val repository = getURL()
         val dependencyUrl =
             "$repository/${artifact.groupId.replace(".", "/")}/${artifact.artifactId}/maven-metadata.xml"
-        val url = URL(dependencyUrl)
-        val connection = url.openConnection() as HttpURLConnection
-        connection.requestMethod = "HEAD"
-        try {
-            connection.connect()
+        val request = okhttp3.Request.Builder()
+            .url(dependencyUrl)
+            .build()
+
+        return try {
+            okHttpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    // Check if the version is available
+                    val data = response.body.string()
+                    if (data.contains(artifact.version)) {
+                        artifact.mavenMetadata = data
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
         } catch (e: Exception) {
-            return false
+            e.printStackTrace()
+            false
         }
-        val isArtifactAvailable = connection.responseCode == 200
-        if (isArtifactAvailable) {
-            // Check if the version is available
-            return url.readText().contains(artifact.version)
-        }
-        return false
     }
 
     fun getName(): String

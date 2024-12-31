@@ -9,8 +9,6 @@ For a proper example, checkout Main.kt.
 
 For checking if an artifact exists (in the above mentioned repositories), you can simply do
 ```kt
-import org.cosmic.ide.dependency.resolver.getArtifact
-
 val groupId = "com.squareup.retrofit2"
 val artifactId = "retrofit"
 val version = "2.9.0"
