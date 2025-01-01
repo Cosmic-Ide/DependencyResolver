@@ -75,7 +75,7 @@ suspend fun Document.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): Conc
             return@coroutineScope artifacts
         }
 
-        val dependencyElements = elem.item(elem.length - 1) as Element
+        val dependencyElements = elem.item(0) as Element
         val dependencies = dependencyElements.getElementsByTagName("dependency")
 
         val deferred = (0 until dependencies.length).map { i ->
