@@ -11,6 +11,7 @@
 package org.cosmic.ide.dependency.resolver.api
 
 import org.cosmic.ide.dependency.resolver.okHttpClient
+import org.cosmic.ide.dependency.resolver.xmlDeserializer
 
 interface Repository {
     fun checkExists(artifact: Artifact): Boolean {
@@ -24,14 +25,10 @@ interface Repository {
         return try {
             okHttpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    // Check if the version is available
-                    val data = response.body.string()
-                    if (data.contains(artifact.version)) {
-                        artifact.mavenMetadata = data
-                        true
-                    } else {
-                        false
-                    }
+                    artifact.mavenMetadata = xmlDeserializer.readValue(response.body.byteStream(),
+                        MavenMetadata::class.java)
+
+                    return true
                 } else {
                     false
                 }

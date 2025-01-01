@@ -11,7 +11,7 @@ open class EventReciever {
     }
 
     open fun onArtifactNotFound(artifact: Artifact) {
-        logger.info("No repository contains ${artifact.artifactId}:${artifact.version}")
+        logger.info("No repository contains ${artifact.groupId}:${artifact.artifactId}:${artifact.version}")
     }
 
     open fun onFetchingLatestVersion(artifact: Artifact) {

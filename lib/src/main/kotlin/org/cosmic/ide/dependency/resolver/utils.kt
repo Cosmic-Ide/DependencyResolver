@@ -9,35 +9,43 @@
 
 package org.cosmic.ide.dependency.resolver
 
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.dataformat.xml.JacksonXmlModule
+import com.fasterxml.jackson.dataformat.xml.XmlMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import org.cosmic.ide.dependency.resolver.api.Artifact
 import org.cosmic.ide.dependency.resolver.api.EventReciever
+import org.cosmic.ide.dependency.resolver.api.ProjectObjectModel
 import org.cosmic.ide.dependency.resolver.api.Repository
 import org.cosmic.ide.dependency.resolver.repository.GoogleMaven
 import org.cosmic.ide.dependency.resolver.repository.Jitpack
 import org.cosmic.ide.dependency.resolver.repository.MavenCentral
 import org.cosmic.ide.dependency.resolver.repository.SonatypeSnapshots
-import org.w3c.dom.Document
-import org.w3c.dom.Element
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.ConcurrentLinkedQueue
-import javax.xml.parsers.DocumentBuilderFactory
 
 val repositories = ConcurrentLinkedQueue<Repository>().apply {
-    addAll(listOf(MavenCentral(), Jitpack(), GoogleMaven(), SonatypeSnapshots()))
+    addAll(listOf(MavenCentral(), GoogleMaven(), Jitpack(), SonatypeSnapshots()))
 }
 var eventReciever = EventReciever()
 val okHttpClient = okhttp3.OkHttpClient()
 
+val xmlDeserializer: ObjectMapper = XmlMapper(JacksonXmlModule().apply {
+    setDefaultUseWrapper(false)
+}).registerKotlinModule().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    .configure(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY, true)
+
 fun getArtifact(groupId: String, artifactId: String, version: String): Artifact? {
     val artifact = initHost(Artifact(groupId, artifactId, version)) ?: return null
-    val factory = DocumentBuilderFactory.newInstance()
-    val builder = factory.newDocumentBuilder()
-    val doc = builder.parse(artifact.getPOM()!!)
 
-    val packaging = doc.getElementsByTagName("packaging").item(0)
-    if (packaging != null) artifact.extension = packaging.textContent
+    val pom = artifact.getPOM()!!
+    artifact.extension = pom.packaging ?: "jar"
+
     return artifact
 }
 
@@ -46,10 +54,12 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact?
  * Returns null if no repository hosts this artifact
  */
 fun initHost(artifact: Artifact): Artifact? {
+    if (artifact.repository != null) {
+        return artifact
+    }
     for (repository in repositories) {
         if (repository.checkExists(artifact)) {
             artifact.repository = repository
-            eventReciever.onArtifactFound(artifact)
             return artifact
         }
     }
@@ -57,133 +67,109 @@ fun initHost(artifact: Artifact): Artifact? {
     return null
 }
 
-/*
- * Resolves a POM file from InputStream and returns the list of artifacts it depends on.
- */
-suspend fun Document.resolvePOM(resolved: ConcurrentLinkedQueue<Artifact>): ConcurrentLinkedQueue<Artifact> =
-    coroutineScope {
-        val artifacts = ConcurrentLinkedQueue<Artifact>()
-        val elem = getElementsByTagName("dependencies")
-        if (elem.length == 0) {
-            eventReciever.onDependenciesNotFound(
-                Artifact(
-                    getElementsByTagName("groupId").item(0).textContent,
-                    getElementsByTagName("artifactId").item(0).textContent,
-                    getElementsByTagName("version").item(0).textContent
-                )
-            )
-            return@coroutineScope artifacts
+suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>>, managedDependencies: ConcurrentLinkedDeque<Artifact>) : ConcurrentLinkedDeque<Artifact> {
+    managedDependencies.addAll(dependencyManagement?.dependencies.orEmpty().map {
+        Artifact(it.groupId ?: groupId ?: parent!!.groupId, it.artifactId, it.version ?: "")
+    })
+    val deps = ConcurrentLinkedDeque<Artifact>()
+    dependencies.orEmpty().filterNot {
+        val invalidScope = it.scope == "test" || it.scope == "provided"
+        if (invalidScope) {
+            eventReciever.onInvalidScope(Artifact(it.groupId ?: "", it.artifactId, it.version ?: ""), it.scope!!)
         }
+        return@filterNot invalidScope
+    }.parallelForEach { dependency ->
+        val previous =
+            resolved.keys.find { a -> a.groupId == dependency.groupId && a.artifactId == dependency.artifactId }
 
-        val dependencyElements = elem.item(0) as Element
-        val dependencies = dependencyElements.getElementsByTagName("dependency")
-
-        val deferred = (0 until dependencies.length).map { i ->
-            async {
-                val dependencyElement = dependencies.item(i) as Element
-                val scopeItem = dependencyElement.getElementsByTagName("scope").item(0)
-                if (scopeItem != null) {
-                    val scope = scopeItem.textContent
-                    if (scope.isNotEmpty() && (scope == "test" || scope == "provided")) {
-                        eventReciever.onInvalidScope(
-                            Artifact(
-                                dependencyElement.getElementsByTagName("groupId")
-                                    .item(0)?.textContent ?: "",
-                                dependencyElement.getElementsByTagName("artifactId")
-                                    .item(0)?.textContent ?: "",
-                                dependencyElement.getElementsByTagName("version")
-                                    .item(0)?.textContent ?: ""
-                            ), scope
-                        )
-                        return@async
-                    }
-                }
-                val groupId = dependencyElement.getElementsByTagName("groupId").item(0).textContent
-                val artifactId =
-                    dependencyElement.getElementsByTagName("artifactId").item(0).textContent
-                if (artifactId.endsWith("bom")) {
-                    return@async
-                }
-                val item =
-                    dependencyElement.getElementsByTagName("version").item(0)?.textContent ?: ""
-
-                if (resolved.any { it.groupId == groupId && it.artifactId == artifactId }) {
-                    val found =
-                        resolved.find { it.groupId == groupId && it.artifactId == artifactId }!!
-                    val newer = maxOf(
-                        found.version,
-                        if (item.startsWith("[")) getLatestRangeVersion(found, item) else item
-                    )
-                    if (newer != found.version) {
-                        found.resolve(resolved)
-                        found.version = newer
-                    } else {
-                        eventReciever.onSkippingResolution(Artifact(groupId, artifactId, item))
-                    }
-                    return@async
-                }
-
-                val artifact = Artifact(groupId, artifactId)
+        if (previous != null) {
+            val artifact = Artifact(dependency.groupId ?: groupId ?: parent!!.groupId, dependency.artifactId, dependency.version?: "")
+            if (needsVersionFix(dependency.version ?: "")) {
                 initHost(artifact)
-                if (artifact.repository == null) {
-                    return@async
-                }
-
-                var version = item
-                if (version.startsWith("[")) {
-                    version = getLatestRangeVersion(artifact, version)
-                }
-                if (version == "+") {
-                    version = ""
-                }
-                if (version.startsWith("\${")) {
-                    val tagName = version.substring(2, version.length - 1)
-                    val tag = getElementsByTagName(tagName).item(0)
-                    if (tag == null) {
-                        eventReciever.onVersionNotFound(artifact)
-                        return@async
-                    }
-                    version = tag.textContent
-                }
-
-                if (version.isBlank()) {
-                    eventReciever.onFetchingLatestVersion(artifact)
-                    val factory = DocumentBuilderFactory.newInstance()
-                    val builder = factory.newDocumentBuilder()
-                    val doc = builder.parse(artifact.mavenMetadata.byteInputStream())
-                    val v = doc.getElementsByTagName("release").item(0)
-                    if (v != null) {
-                        version = v.textContent
-                    }
-                }
-                artifact.version = version
-
-                artifacts.add(artifact)
+                fixVersion(artifact, properties)
             }
-        }
-        deferred.awaitAll()
-        artifacts
-    }
+            if (getNewerVersion(previous.version, artifact.version) == previous.version) {
+                return@parallelForEach
+            }
 
+            previous.version = artifact.version
+            resolved[previous]?.forEach {
+                it.dependencies?.find { a -> a.groupId == previous.groupId && a.artifactId == previous.artifactId }?.version =
+                    previous.version
+                println("Updating ${previous.artifactId} to ${previous.version} for ${it.artifactId}")
+            }
+            // again resolve this for newer version
+            return@parallelForEach
+        }
+        val artifact = Artifact(dependency.groupId ?: groupId ?: parent!!.groupId, dependency.artifactId, dependency.version ?: "")
+        eventReciever.onResolving(Artifact(groupId ?: parent!!.groupId, artifactId, version ?: ""), artifact)
+        initHost(artifact)
+        if (artifact.repository == null) {
+            eventReciever.onArtifactNotFound(artifact)
+            return@parallelForEach
+        }
+        eventReciever.onArtifactFound(artifact)
+        managedDependencies.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.let {
+            artifact.version = it.version
+        }
+        if (needsVersionFix(dependency.version ?: "")) {
+            fixVersion(artifact, properties)
+        }
+        artifact.extension = artifact.getPOM()?.packaging ?: "jar"
+        deps.add(artifact)
+        eventReciever.onResolutionComplete(artifact)
+    }
+    return deps
+}
+
+private fun needsVersionFix(version: String): Boolean {
+    return version.isEmpty() || version == "+" || version.startsWith("[") || version.startsWith("\${")
+}
+
+private fun fixVersion(artifact: Artifact, properties: Map<String, String>?) {
+    if (artifact.version.isEmpty() || artifact.version == "+") {
+        eventReciever.onFetchingLatestVersion(artifact)
+        artifact.version = artifact.mavenMetadata!!.versioning.release
+        eventReciever.onFetchedLatestVersion(artifact, artifact.version)
+    } else if (artifact.version.startsWith("[")) {
+        artifact.version = getLatestRangeVersion(artifact, artifact.version)
+    } else if (artifact.version.startsWith("\${")) {
+        artifact.version = properties?.get(artifact.version.substring(2, artifact.version.length - 1)) ?: ""
+    }
+}
+
+/*
+ * Gets the latest version of the artifact from the given version range.
+ *
+ * @param artifact The artifact to get the latest version of.
+ * @param version The version range to get the latest version from.
+ * @return The latest version of the artifact.
+ */
 fun getLatestRangeVersion(artifact: Artifact, version: String): String {
     if (!version.contains(",")) {
         return version.substring(1, version.length - 1)
     }
     val (start, end) = version.substring(1, version.length - 1).split(",")
     eventReciever.onFetchingLatestVersion(artifact)
-    val factory = DocumentBuilderFactory.newInstance()
-    val builder = factory.newDocumentBuilder()
-    val doc = builder.parse(artifact.mavenMetadata.byteInputStream())
-    val versions = doc.getElementsByTagName("versions").item(0).childNodes
-    for (i in 0 until versions.length) {
-        val v = versions.item(i).textContent
+
+    artifact.mavenMetadata!!.versioning.versions.forEach { v ->
         if (maxOf(v, start) == v && minOf(v, end) == v) {
             return v
         }
     }
-    return doc.getElementsByTagName("release").item(0).textContent
+    return artifact.mavenMetadata!!.versioning.release
 }
 
+fun getNewerVersion(existing: String, new: String): String {
+    return if (maxOf(existing, new) == new) new else existing
+}
+
+/*
+ * Runs the given action on each element of the iterable in parallel.
+ * Returns a list of the results of the actions.
+ *
+ * @param action The action to run on each element.
+ */
 suspend fun <T> Iterable<T>.parallelForEach(action: suspend (T) -> Unit) = coroutineScope {
     map { element ->
         async { action(element) }
