@@ -129,7 +129,9 @@ private fun needsVersionFix(version: String): Boolean {
 private fun fixVersion(artifact: Artifact, properties: Map<String, String>?) {
     if (artifact.version.isEmpty() || artifact.version == "+") {
         eventReciever.onFetchingLatestVersion(artifact)
-        artifact.version = artifact.mavenMetadata!!.versioning.release
+        artifact.version = artifact.mavenMetadata!!.versioning.let {
+            it.release ?: it.latest ?: it.versions.lastOrNull() ?: artifact.version.substringBefore("+")
+        }
         eventReciever.onFetchedLatestVersion(artifact, artifact.version)
     } else if (artifact.version.startsWith("[")) {
         artifact.version = getLatestRangeVersion(artifact, artifact.version)
@@ -157,7 +159,9 @@ fun getLatestRangeVersion(artifact: Artifact, version: String): String {
             return v
         }
     }
-    return artifact.mavenMetadata!!.versioning.release
+    return artifact.mavenMetadata!!.versioning.let {
+        it.release ?: it.latest ?: it.versions.lastOrNull() ?: artifact.version.substringBefore("+")
+    }
 }
 
 fun getNewerVersion(existing: String, new: String): String {

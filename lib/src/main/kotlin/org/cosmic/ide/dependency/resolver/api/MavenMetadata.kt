@@ -18,14 +18,14 @@ data class MavenMetadata(
 
 data class Versioning(
     @JacksonXmlProperty(localName = "latest")
-    val latest: String,
+    val latest: String?,
     @JacksonXmlProperty(localName = "release")
-    val release: String,
+    val release: String?,
     @JacksonXmlProperty(localName = "versions")
     @get:JacksonXmlElementWrapper(useWrapping = false)
     val versionsList: Versions,
     @JacksonXmlProperty(localName = "lastUpdated")
-    val lastUpdated: String
+    val lastUpdated: String?
 ) {
     val versions: List<String>
         get() = versionsList.versionList
