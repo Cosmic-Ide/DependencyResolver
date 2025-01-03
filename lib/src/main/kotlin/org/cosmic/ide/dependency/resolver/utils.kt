@@ -73,9 +73,9 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
     })
     val deps = ConcurrentLinkedDeque<Artifact>()
     dependencies.orEmpty().filterNot {
-        val invalidScope = it.scope == "test" || it.scope == "provided"
+        val invalidScope = it.scope == "test" || it.scope == "provided" || it.optional
         if (invalidScope) {
-            eventReciever.onInvalidScope(Artifact(it.groupId ?: "", it.artifactId, it.version ?: ""), it.scope!!)
+            eventReciever.onInvalidScope(Artifact(it.groupId ?: "", it.artifactId, it.version ?: ""), it.scope ?: "Optional")
         }
         return@filterNot invalidScope
     }.parallelForEach { dependency ->
@@ -102,7 +102,7 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
             return@parallelForEach
         }
         val artifact = Artifact(dependency.groupId ?: groupId ?: parent!!.groupId, dependency.artifactId, dependency.version ?: "")
-        eventReciever.onResolving(Artifact(groupId ?: parent!!.groupId, artifactId, version ?: ""), artifact)
+        eventReciever.onResolving(Artifact(groupId ?: parent!!.groupId, artifactId, version ?: parent!!.version), artifact)
         initHost(artifact)
         if (artifact.repository == null) {
             eventReciever.onArtifactNotFound(artifact)

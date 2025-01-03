@@ -53,7 +53,9 @@ data class Dependency(
     @JacksonXmlProperty(localName = "version")
     val version: String?,
     @JacksonXmlProperty(localName = "scope")
-    val scope: String?
+    val scope: String?,
+    @JacksonXmlProperty(localName = "optional")
+    val optional: Boolean = false,
 ) {
     override fun toString(): String {
         return "$groupId:$artifactId:$version"
