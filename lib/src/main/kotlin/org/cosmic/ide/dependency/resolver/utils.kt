@@ -128,15 +128,15 @@ private fun needsVersionFix(version: String): Boolean {
     return version.isEmpty() || version == "+" || version.startsWith("[") || version.startsWith("\${")
 }
 
-private fun fixVersion(artifact: Artifact, properties: Map<String, String>?) {
+private fun fixVersion(artifact: Artifact, properties: Map<String, String>?, resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap()) {
     if (artifact.version.isEmpty() || artifact.version == "+") {
         eventReciever.onFetchingLatestVersion(artifact)
-        artifact.version = artifact.mavenMetadata!!.versioning.let {
+        artifact.version = resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version?.takeIf { maxOf(it, artifact.version) == it } ?: artifact.mavenMetadata!!.versioning.let {
             it.release ?: it.latest ?: it.versions.lastOrNull() ?: artifact.version.substringBefore("+")
         }
         eventReciever.onFetchedLatestVersion(artifact, artifact.version)
     } else if (artifact.version.startsWith("[")) {
-        artifact.version = getLatestRangeVersion(artifact, artifact.version)
+        artifact.version = getLatestRangeVersion(artifact, artifact.version, resolved)
     } else if (artifact.version.startsWith("\${")) {
         artifact.version = properties?.get(artifact.version.substring(2, artifact.version.length - 1)) ?: ""
     }
@@ -149,7 +149,7 @@ private fun fixVersion(artifact: Artifact, properties: Map<String, String>?) {
  * @param version The version range to get the latest version from.
  * @return The latest version of the artifact.
  */
-fun getLatestRangeVersion(artifact: Artifact, version: String): String {
+fun getLatestRangeVersion(artifact: Artifact, version: String, resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap()): String {
     if (!version.contains(",")) {
         return version.substring(1, version.length - 1)
     }
@@ -161,7 +161,7 @@ fun getLatestRangeVersion(artifact: Artifact, version: String): String {
             return v
         }
     }
-    return artifact.mavenMetadata!!.versioning.let {
+    return resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version ?: artifact.mavenMetadata!!.versioning.let {
         it.release ?: it.latest ?: it.versions.lastOrNull() ?: artifact.version.substringBefore("+")
     }
 }
