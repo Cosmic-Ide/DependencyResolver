@@ -47,6 +47,9 @@ data class Artifact(
         }
 
         val artifacts = getAllDependencies()
+
+        dependencies = dependencies?.distinctBy { it.groupId + it.artifactId }
+
         artifacts.forEach { artifact ->
             artifact.downloadTo(
                 File(

@@ -6,7 +6,7 @@ import kotlin.time.measureTime
 
 @OptIn(ExperimentalTime::class)
 suspend fun main() {
-    val artifact = getArtifact("com.google.android.material", "material", "1.13.0-alpha09")
+    val artifact = getArtifact("com.google.android.gms", "play-services-ads", "23.6.0")
     val dir = File("test")
     dir.deleteRecursively()
     dir.mkdir()

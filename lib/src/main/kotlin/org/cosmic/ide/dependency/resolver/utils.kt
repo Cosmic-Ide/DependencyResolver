@@ -89,6 +89,7 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
                 fixVersion(artifact, properties)
             }
             if (getNewerVersion(previous.version, artifact.version) == previous.version) {
+                deps.add(previous)
                 return@parallelForEach
             }
 
@@ -98,6 +99,7 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
                     previous.version
                 println("Updating ${previous.artifactId} to ${previous.version} for ${it.artifactId}")
             }
+            deps.add(previous)
             // again resolve this for newer version
             return@parallelForEach
         }
@@ -108,12 +110,12 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
             eventReciever.onArtifactNotFound(artifact)
             return@parallelForEach
         }
+        if (needsVersionFix(dependency.version ?: "")) {
+            fixVersion(artifact, properties)
+        }
         eventReciever.onArtifactFound(artifact)
         managedDependencies.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.let {
             artifact.version = it.version
-        }
-        if (needsVersionFix(dependency.version ?: "")) {
-            fixVersion(artifact, properties)
         }
         artifact.extension = artifact.getPOM()?.packaging ?: "jar"
         deps.add(artifact)
