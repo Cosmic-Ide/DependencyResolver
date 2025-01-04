@@ -86,7 +86,7 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
             val artifact = Artifact(dependency.groupId ?: groupId ?: parent!!.groupId, dependency.artifactId, dependency.version?: "")
             if (needsVersionFix(dependency.version ?: "")) {
                 initHost(artifact)
-                fixVersion(artifact, properties)
+                fixVersion(artifact, properties, resolved)
             }
             if (getNewerVersion(previous.version, artifact.version) == previous.version) {
                 deps.add(previous)
@@ -111,7 +111,7 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
             return@parallelForEach
         }
         if (needsVersionFix(dependency.version ?: "")) {
-            fixVersion(artifact, properties)
+            fixVersion(artifact, properties, resolved)
         }
         eventReciever.onArtifactFound(artifact)
         managedDependencies.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.let {
@@ -131,7 +131,7 @@ private fun needsVersionFix(version: String): Boolean {
 private fun fixVersion(artifact: Artifact, properties: Map<String, String>?, resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap()) {
     if (artifact.version.isEmpty() || artifact.version == "+") {
         eventReciever.onFetchingLatestVersion(artifact)
-        artifact.version = resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version?.takeIf { maxOf(it, artifact.version) == it } ?: artifact.mavenMetadata!!.versioning.let {
+        artifact.version = resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version?.takeIf { maxOf(it, artifact.version.substringBeforeLast("+")) == it } ?: artifact.mavenMetadata!!.versioning.let {
             it.release ?: it.latest ?: it.versions.lastOrNull() ?: artifact.version.substringBefore("+")
         }
         eventReciever.onFetchedLatestVersion(artifact, artifact.version)
@@ -161,7 +161,7 @@ fun getLatestRangeVersion(artifact: Artifact, version: String, resolved: Concurr
             return v
         }
     }
-    return resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version ?: artifact.mavenMetadata!!.versioning.let {
+    return resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version?.takeIf { maxOf(it, artifact.version.substringBeforeLast("+")) == it } ?: artifact.mavenMetadata!!.versioning.let {
         it.release ?: it.latest ?: it.versions.lastOrNull() ?: artifact.version.substringBefore("+")
     }
 }
