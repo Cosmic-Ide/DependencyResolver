@@ -1,10 +1,8 @@
 /*
- *
- *  This file is part of Cosmic IDE.
- *  Cosmic IDE is a free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
- *  Cosmic IDE is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
- *  You should have received a copy of the GNU General Public License along with Foobar. If not, see <https://www.gnu.org/licenses/>.
- *
+ * This file is part of Cosmic IDE.
+ * Cosmic IDE is a free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+ * Cosmic IDE is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License along with Cosmic IDE. If not, see <https://www.gnu.org/licenses/>.
  */
 
 package org.cosmic.ide.dependency.resolver
@@ -44,7 +42,7 @@ fun getArtifact(groupId: String, artifactId: String, version: String): Artifact?
     val artifact = initHost(Artifact(groupId, artifactId, version)) ?: return null
 
     val pom = artifact.getPOM()!!
-    artifact.extension = pom.packaging ?: "jar"
+    artifact.extension = if (pom.packaging != null && pom.packaging != "bundle") pom.packaging else "jar"
 
     return artifact
 }
@@ -86,7 +84,7 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
             val artifact = Artifact(dependency.groupId ?: groupId ?: parent!!.groupId, dependency.artifactId, dependency.version?: "")
             if (needsVersionFix(dependency.version ?: "")) {
                 initHost(artifact)
-                fixVersion(artifact, properties, resolved)
+                fixVersion(artifact, this, resolved)
             }
             if (getNewerVersion(previous.version, artifact.version) == previous.version) {
                 deps.add(previous)
@@ -111,13 +109,16 @@ suspend fun ProjectObjectModel.resolveDependencies(resolved: ConcurrentHashMap<A
             return@parallelForEach
         }
         if (needsVersionFix(dependency.version ?: "")) {
-            fixVersion(artifact, properties, resolved)
+            fixVersion(artifact, this, resolved)
+            initHost(artifact)
         }
         eventReciever.onArtifactFound(artifact)
         managedDependencies.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.let {
+            eventReciever.logger.warning("Using managed dependency ${it.groupId}:${it.artifactId}:${it.version} for ${artifact.groupId}:${artifact.artifactId}")
             artifact.version = it.version
         }
-        artifact.extension = artifact.getPOM()?.packaging ?: "jar"
+        val pom = artifact.getPOM()
+        artifact.extension = if (pom?.packaging != null && pom.packaging != "bundle") pom.packaging else "jar"
         deps.add(artifact)
         eventReciever.onResolutionComplete(artifact)
     }
@@ -128,7 +129,7 @@ private fun needsVersionFix(version: String): Boolean {
     return version.isEmpty() || version == "+" || version.startsWith("[") || version.startsWith("\${")
 }
 
-private fun fixVersion(artifact: Artifact, properties: Map<String, String>?, resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap()) {
+private fun fixVersion(artifact: Artifact, pom: ProjectObjectModel, resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap()) {
     if (artifact.version.isEmpty() || artifact.version == "+") {
         eventReciever.onFetchingLatestVersion(artifact)
         artifact.version = resolved.keys.find { it.groupId == artifact.groupId && it.artifactId == artifact.artifactId }?.version?.takeIf { maxOf(it, artifact.version.substringBeforeLast("+")) == it } ?: artifact.mavenMetadata!!.versioning.let {
@@ -138,7 +139,11 @@ private fun fixVersion(artifact: Artifact, properties: Map<String, String>?, res
     } else if (artifact.version.startsWith("[")) {
         artifact.version = getLatestRangeVersion(artifact, artifact.version, resolved)
     } else if (artifact.version.startsWith("\${")) {
-        artifact.version = properties?.get(artifact.version.substring(2, artifact.version.length - 1)) ?: ""
+        if (artifact.version == "\${project.version}") {
+            artifact.version = pom.parent?.version ?: pom.version ?: ""
+        } else {
+            artifact.version = pom.properties?.get(artifact.version.substring(2, artifact.version.length - 1)) ?: ""
+        }
     }
 }
 
