@@ -7,7 +7,6 @@
 
 package org.cosmic.ide.dependency.resolver.api
 
-import com.sun.tools.javac.code.TypeAnnotationPosition.field
 import okhttp3.Request
 import org.cosmic.ide.dependency.resolver.eventReciever
 import org.cosmic.ide.dependency.resolver.okHttpClient
