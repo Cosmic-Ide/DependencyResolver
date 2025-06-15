@@ -62,11 +62,11 @@ data class Artifact(
      *
      * @return A list of all the dependencies of the artifact.
      */
-    suspend fun getAllDependencies(): List<Artifact> {
+    suspend fun getAllDependencies(): Set<Artifact> {
         if (dependencies == null) {
             resolveDependencyTree()
         }
-        val deps = mutableListOf<Artifact>()
+        val deps = mutableSetOf<Artifact>()
         dependencies!!.forEach { dep ->
             deps.add(dep)
             deps.addAll(dep.getAllDependencies())
