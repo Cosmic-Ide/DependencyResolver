@@ -9,11 +9,12 @@ package org.cosmic.ide.dependency.resolver.api
 
 import org.cosmic.ide.dependency.resolver.okHttpClient
 import org.cosmic.ide.dependency.resolver.xmlDeserializer
+import kotlin.jvm.java
 
 interface Repository {
     fun checkExists(artifact: Artifact): Boolean {
         val repository = getURL()
-        val dependencyUrl =
+        var dependencyUrl =
             "$repository/${artifact.groupId.replace(".", "/")}/${artifact.artifactId}/maven-metadata.xml"
         val request = okhttp3.Request.Builder()
             .url(dependencyUrl)
@@ -27,6 +28,20 @@ interface Repository {
 
                     return true
                 } else {
+                    // If library does not have any releases, it doesn't create maven-metadata.xml. So we directly check the pom for the artifact.
+                    dependencyUrl =
+                        "$repository/${artifact.groupId.replace(".", "/")}/${artifact.artifactId}/${artifact.version}/${artifact.artifactId}-${artifact.version}.pom"
+                    val request = okhttp3.Request.Builder()
+                        .url(dependencyUrl)
+                        .build()
+
+                    okHttpClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            artifact.pom = xmlDeserializer.readValue(response.body.byteStream(),
+                                ProjectObjectModel::class.java)
+                            return true
+                        }
+                    }
                     false
                 }
             }

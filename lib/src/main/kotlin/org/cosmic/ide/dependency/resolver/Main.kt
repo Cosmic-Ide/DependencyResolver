@@ -7,23 +7,20 @@
 
 package org.cosmic.ide.dependency.resolver
 
-import kotlinx.coroutines.runBlocking
+import org.cosmic.ide.dependency.resolver.api.Artifact
+import org.cosmic.ide.dependency.resolver.repository.Jitpack
 import java.io.File
 import kotlin.system.measureTimeMillis
 import kotlin.time.ExperimentalTime
 
 @OptIn(ExperimentalTime::class)
 suspend fun main() {
-    val artifact = getArtifact("androidx.compose.material3", "material3", "1.4.0-alpha16")
+    val artifact = Artifact("com.github.PranavPurwar", "filepicker", "e6ed776a13")
+    println(Jitpack().checkExists(artifact!!))
     val dir = File("test")
     dir.deleteRecursively()
     dir.mkdir()
         println("Starting...")
-        //artifact?.showDependencyTree()
-//        artifact?.getAllDependencies()!!.forEach { dep ->
-//            println(dep)
-//        }
-        //artifact?.downloadArtifact(dir)
     val time = measureTimeMillis {
         artifact?.resolveDependencyTree()
         artifact?.showDependencyTree()
