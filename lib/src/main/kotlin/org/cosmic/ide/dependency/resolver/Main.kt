@@ -7,30 +7,27 @@
 
 package org.cosmic.ide.dependency.resolver
 
+import kotlinx.coroutines.runBlocking
 import java.io.File
+import kotlin.system.measureTimeMillis
 import kotlin.time.ExperimentalTime
-import kotlin.time.measureTime
 
 @OptIn(ExperimentalTime::class)
 suspend fun main() {
-    val artifact = getArtifact("com.google.android.material", "material", "1.14.0-alpha01")
+    val artifact = getArtifact("androidx.compose.material3", "material3", "1.4.0-alpha16")
     val dir = File("test")
     dir.deleteRecursively()
     dir.mkdir()
-    val time = measureTime {
         println("Starting...")
         //artifact?.showDependencyTree()
 //        artifact?.getAllDependencies()!!.forEach { dep ->
 //            println(dep)
 //        }
         //artifact?.downloadArtifact(dir)
-        artifact?.getAllDependencies()?.forEach { dep ->
-            dep.dependencies?.filter { it.groupId == "androidx.annotation" && it.artifactId == "annotation" }?.forEach { d ->
-                println("Found dependency: $d due to $dep")
-            }
-        }
-
+    val time = measureTimeMillis {
+        artifact?.resolveDependencyTree()
         artifact?.showDependencyTree()
     }
-    println("Total time: $time")
+    artifact?.downloadArtifact(dir)
+    println("Time taken: $time ms")
 }

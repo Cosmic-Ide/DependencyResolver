@@ -70,25 +70,25 @@ data class Dependency(
 }
 
 data class Build(
-    @get:JacksonXmlElementWrapper(useWrapping = false) @get:JacksonXmlProperty(localName = "plugin") val plugins: List<Plugin>?
+    @JacksonXmlElementWrapper(useWrapping = false) @JacksonXmlProperty(localName = "plugin") val plugins: List<Plugin>?
 )
 
 data class Plugin(
     @JacksonXmlProperty(localName = "groupId") val groupId: String?,
     @JacksonXmlProperty(localName = "artifactId") val artifactId: String?,
     @JacksonXmlProperty(localName = "version") val version: String?,
-    @get:JacksonXmlElementWrapper(useWrapping = false) @get:JacksonXmlProperty(localName = "execution") val executions: List<Execution>?
+    @JacksonXmlElementWrapper(useWrapping = false) @JacksonXmlProperty(localName = "execution") val executions: List<Execution>?
 )
 
 data class Execution(
     @JacksonXmlProperty(localName = "id") val id: String?,
-    @get:JacksonXmlElementWrapper(useWrapping = false) @get:JacksonXmlProperty(localName = "goal") val goals: List<String>?
+    @JacksonXmlElementWrapper(useWrapping = false) @JacksonXmlProperty(localName = "goal") val goals: List<String>?
 )
 
 data class Profile(
     @JacksonXmlProperty(localName = "id") val id: String?,
     @JacksonXmlProperty(localName = "activation") val activation: Activation?,
-    @get:JacksonXmlElementWrapper(useWrapping = false) @get:JacksonXmlProperty(localName = "property") val properties: Map<String, String>?
+    @JacksonXmlElementWrapper(useWrapping = false) @JacksonXmlProperty(localName = "property") val properties: Map<String, String>?
 )
 
 data class Activation(

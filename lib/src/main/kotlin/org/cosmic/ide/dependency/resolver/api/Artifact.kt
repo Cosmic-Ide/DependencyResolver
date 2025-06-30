@@ -12,11 +12,15 @@ import org.cosmic.ide.dependency.resolver.eventReciever
 import org.cosmic.ide.dependency.resolver.okHttpClient
 import org.cosmic.ide.dependency.resolver.resolveDependencies
 import org.cosmic.ide.dependency.resolver.xmlDeserializer
+import org.cosmic.ide.dependency.resolver.parallelForEach
+import org.cosmic.ide.dependency.resolver.getNewerVersion
+// import org.cosmic.ide.dependency.resolver.compareVersions // Make sure this utility is available
 import java.io.File
 import java.io.IOException
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
+import kotlin.collections.ArrayDeque
 
 data class Artifact(
     val groupId: String,
@@ -26,118 +30,175 @@ data class Artifact(
     var extension: String = "jar"
 ) {
     var mavenMetadata: MavenMetadata? = null
-
-    // Direct dependencies of the artifact.
     var dependencies: List<Artifact>? = null
-
-    // The Project Object Model of the artifact.
     var pom: ProjectObjectModel? = null
 
-    /**
-     * Downloads the artifact to the specified directory.
-     *
-     * @param output The directory to download the artifact to.
-     */
     suspend fun downloadArtifact(output: File) {
         output.mkdirs()
-        if (dependencies == null) {
-            resolveDependencyTree()
-        }
+        // Ensure dependencies are resolved and consolidated before downloading
+        val allArtifactsToDownload = (getAllDependencies() + this).toSet()
 
-        val artifacts = getAllDependencies()
-
-        dependencies = dependencies?.distinctBy { it.groupId + it.artifactId }
-
-        artifacts.forEach { artifact ->
-            artifact.downloadTo(
-                File(
-                    output, "${artifact.artifactId}-${artifact.version}.${artifact.extension}"
-                )
-            )
+        allArtifactsToDownload.forEach { artifact ->
+            val artifactFile = File(output, "${artifact.artifactId}-${artifact.version}.${artifact.extension}")
+            if (!artifactFile.exists()) {
+                artifact.downloadTo(artifactFile)
+            }
         }
     }
 
-    /**
-     * Gets all the dependencies of the artifact.
-     *
-     * @return A list of all the dependencies of the artifact.
-     */
     suspend fun getAllDependencies(): Set<Artifact> {
-        if (dependencies == null) {
+        if (this.dependencies == null) { // Ensure the dependency tree is resolved for the starting artifact
             resolveDependencyTree()
         }
-        val deps = mutableSetOf<Artifact>()
-        dependencies!!.forEach { dep ->
-            deps.add(dep)
-            deps.addAll(dep.getAllDependencies())
+
+        val allResolvedArtifactsInGraph = mutableSetOf<Artifact>()
+        val queue = ArrayDeque<Artifact>()
+
+        // Start BFS from the direct dependencies of the current artifact
+        this.dependencies?.forEach { queue.add(it) }
+
+        val visitedForTraversal = mutableSetOf<Artifact>() // Prevents cycles during full graph traversal
+
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (visitedForTraversal.add(current)) { // Relies on Artifact's equals/hashCode (including version)
+                allResolvedArtifactsInGraph.add(current)
+                current.dependencies?.forEach { dep ->
+                    if (!visitedForTraversal.contains(dep)) {
+                        queue.add(dep)
+                    }
+                }
+            }
         }
-        return deps
+
+        // Now, consolidate to the newest version for each groupId:artifactId
+        val newestArtifactsMap = mutableMapOf<Pair<String, String>, Artifact>()
+        for (artifact in allResolvedArtifactsInGraph) {
+            val key = Pair(artifact.groupId, artifact.artifactId)
+            val existingNewest = newestArtifactsMap[key]
+
+            if (existingNewest == null) {
+                newestArtifactsMap[key] = artifact
+            } else {
+                // Assuming getNewerVersion returns the actual string of the newer version
+                val newerVersionString = getNewerVersion(existingNewest.version, artifact.version)
+                if (newerVersionString == artifact.version && existingNewest.version != artifact.version) {
+                    newestArtifactsMap[key] = artifact
+                }
+            }
+        }
+        return newestArtifactsMap.values.toSet()
     }
 
-    /**
-     * Prints the dependency tree of the artifact.
-     *
-     * @param depth The depth of the dependency tree.
-     */
-    suspend fun showDependencyTree(depth: Int = 0) {
-        if (dependencies == null) {
-            resolveDependencyTree()
-        }
+    fun showDependencyTree(depth: Int = 0) {
         println("    ".repeat(depth) + this)
-        dependencies!!.forEach { dep ->
+        dependencies?.forEach { dep ->
             dep.showDependencyTree(depth + 1)
         }
     }
 
-    /**
-     * Resolves the artifact and its dependencies.
-     *
-     * @param resolved The list of resolved artifacts.
-     * @return The list of resolved artifacts.
-     */
-    suspend fun resolve(resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>>(), managedDependencies: ConcurrentLinkedDeque<Artifact> = ConcurrentLinkedDeque()): ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> {
-        if (repository == null) {
-            throw IllegalStateException("Repository is not declared.")
-        }
-
-        if (dependencies != null) {
+    suspend fun resolve(
+        resolved: ConcurrentHashMap<Pair<String, String>, Pair<Artifact, ConcurrentLinkedDeque<Artifact>>>,
+        managedDependencies: ConcurrentLinkedDeque<Artifact>
+    ) {
+        if (this.dependencies != null) {
             eventReciever.onSkippingResolution(this)
-            return resolved
+            return
         }
 
-        val deps = getPOM()?.resolveDependencies(resolved, managedDependencies)
-        if (deps != null) {
-            resolved[this] = deps
-            dependencies = deps.toList()
-        } else {
-            dependencies = emptyList()
+        val key = Pair(groupId, artifactId)
+        val cachedEntry = resolved[key]
+
+        if (cachedEntry != null) {
+            val cachedArtifactInstance = cachedEntry.first
+            val cachedDependencies = cachedEntry.second
+            
+            // Placeholder: Implement compareVersions(v1: String, v2: String): Int in utils.kt
+            // It should return < 0 if v1 < v2, 0 if v1 == v2, > 0 if v1 > v2
+            // For now, using getNewerVersion as a proxy, needs refinement with compareVersions
+            val comparisonResult: Int = when {
+                getNewerVersion(this.version, cachedArtifactInstance.version) == this.version && this.version != cachedArtifactInstance.version -> 1 // this is newer
+                getNewerVersion(this.version, cachedArtifactInstance.version) == cachedArtifactInstance.version && this.version != cachedArtifactInstance.version -> -1 // this is older
+                else -> 0 // versions are the same
+            }
+
+            if (comparisonResult < 0) { // Current artifact is older than the cached one
+                this.dependencies = emptyList()
+                eventReciever.onSkippingResolution(this)
+                eventReciever.logger.info("Skipping $this - older than cached version ${cachedArtifactInstance.version}")
+                return
+            } else if (comparisonResult == 0) { // Current artifact is the same version as the cached one
+                this.dependencies = cachedDependencies.toList() // Reuse dependencies
+                eventReciever.onSkippingResolution(this)
+                eventReciever.logger.info("Skipping $this - same as cached version, reusing dependencies")
+                return
+            }
+            // If current version is newer (comparisonResult > 0), proceed to resolve it.
+            // The cache will be updated with this newer version.
+            eventReciever.logger.info("Proceeding with $this - newer than cached version ${cachedArtifactInstance.version}")
+        }
+
+        if (repository == null) {
+            org.cosmic.ide.dependency.resolver.initHost(this)
+            if (repository == null) {
+                this.dependencies = emptyList()
+                resolved[key] = Pair(this, ConcurrentLinkedDeque()) // Cache unresolvable state
+                throw IllegalStateException("Repository is not declared for $groupId:$artifactId:$version and could not be initialized.")
+            }
+        }
+        
+        val pomFile = getPOM()
+        if (pomFile == null) {
+            this.dependencies = emptyList()
+            resolved[key] = Pair(this, ConcurrentLinkedDeque()) // Cache no POM/deps state
+            eventReciever.onInvalidPOM(this)
+            return
+        }
+
+        val directDependencies = pomFile.resolveDependencies(resolved, managedDependencies)
+        this.dependencies = directDependencies.toList()
+        if (this.dependencies?.isEmpty() == true) {
             eventReciever.onDependenciesNotFound(this)
         }
-
-        return resolved
+        resolved[key] = Pair(this, directDependencies) // Update cache with this version
+        eventReciever.onResolutionComplete(this)
     }
 
-    suspend fun resolveDependencyTree(resolved: ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>> = ConcurrentHashMap<Artifact, ConcurrentLinkedDeque<Artifact>>(), managedDependencies: ConcurrentLinkedDeque<Artifact> = ConcurrentLinkedDeque()): List<Artifact> {
-        if (dependencies == null) {
-            resolve(resolved, managedDependencies)
+    suspend fun resolveDependencyTree(
+        resolved: ConcurrentHashMap<Pair<String, String>, Pair<Artifact, ConcurrentLinkedDeque<Artifact>>> = ConcurrentHashMap(),
+        managedDependencies: ConcurrentLinkedDeque<Artifact> = ConcurrentLinkedDeque()
+    ) {
+        val queue = ArrayDeque<Artifact>()
+        queue.add(this) 
+
+        val visitedInThisCall = mutableSetOf<Artifact>() // Tracks G:A:V for the current call context
+        visitedInThisCall.add(this)
+
+        while (queue.isNotEmpty()) {
+            val currentLevelArtifacts = mutableListOf<Artifact>()
+            while(queue.isNotEmpty()) {
+                currentLevelArtifacts.add(queue.removeFirst())
+            }
+
+            currentLevelArtifacts.filter { it.dependencies == null }.parallelForEach { artifact ->
+                artifact.resolve(resolved, managedDependencies)
+            }
+
+            for (artifact in currentLevelArtifacts) {
+                artifact.dependencies?.forEach { dependency ->
+                    if (visitedInThisCall.add(dependency)) { // Add G:A:V to queue if not visited in this *specific* call
+                        queue.add(dependency)
+                    }
+                }
+            }
         }
-        val deps = mutableListOf<Artifact>()
-        dependencies!!.forEach { dep ->
-            deps.add(dep)
-            deps.addAll(dep.resolveDependencyTree(resolved, managedDependencies))
-        }
-        return deps
     }
 
-    /**
-     * Downloads the artifact to the specified file.
-     *
-     * @param output The file to download the artifact to.
-     */
     fun downloadTo(output: File) {
         if (repository == null) {
-            throw IllegalStateException("Repository is not declared.")
+            throw IllegalStateException("Repository is not declared for $groupId:$artifactId:$version during downloadTo.")
         }
+        output.parentFile?.mkdirs() 
         output.createNewFile()
         val dependencyUrl = "${repository!!.getURL()}/${
             groupId.replace(
@@ -148,7 +209,7 @@ data class Artifact(
         val request = Request.Builder().url(dependencyUrl).build()
         try {
             okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("Unexpected code $response")
+                if (!response.isSuccessful) throw IOException("Unexpected code ${'$'}{response.code} for $dependencyUrl")
                 response.body.byteStream().use { input ->
                     output.outputStream().use { input.copyTo(it) }
                 }
@@ -159,20 +220,22 @@ data class Artifact(
         }
     }
 
-    /**
-     * Gets the Project Object Model of the artifact.
-     *
-     * @return The Project Object Model of the artifact.
-     */
+    // Note: getPOM is not suspend, but it calls initHost which might do network I/O implicitly.
+    // Consider if getPOM should be suspend if initHost itself becomes suspend or makes blocking calls that should be suspend.
     fun getPOM(): ProjectObjectModel? {
-        if (pom != null) {
+        if (pom != null) { 
             return pom
         }
         if (repository == null) {
-            throw IllegalStateException("Repository is not declared.")
+            org.cosmic.ide.dependency.resolver.initHost(this) // This can do network I/O
+            if (repository == null) {
+                eventReciever.onInvalidPOM(this)
+                return null 
+            }
         }
         if (version.isEmpty()) {
-            throw IllegalStateException("Version is not declared.")
+            eventReciever.onInvalidPOM(this)
+            return null
         }
         val pomUrl = "${repository?.getURL()}/${
             groupId.replace(
@@ -182,19 +245,26 @@ data class Artifact(
 
         val request = Request.Builder().url(pomUrl).build()
         try {
-            val response = okHttpClient.newCall(request).execute()
-            if (!response.isSuccessful) throw IOException("Unexpected code $response")
-            pom = xmlDeserializer.readValue(
+            val response = okHttpClient.newCall(request).execute() // Blocking network call
+            if (!response.isSuccessful) {
+                eventReciever.onVersionNotFound(this)
+                return null
+            }
+            this.pom = xmlDeserializer.readValue(
                 response.body.byteStream(),
                 ProjectObjectModel::class.java
             )
+            return this.pom
         } catch (_: SocketException) {
             eventReciever.onVersionNotFound(this)
-        } catch (e: Exception) {
-            e.printStackTrace()
+            return null
+        } catch (_: IOException) {
             eventReciever.onInvalidPOM(this)
+            return null
+        } catch (_: Exception) {
+            eventReciever.onInvalidPOM(this)
+            return null
         }
-        return pom
     }
 
     override fun toString(): String {
@@ -202,7 +272,10 @@ data class Artifact(
     }
 
     override fun hashCode(): Int {
-        return "$groupId:$artifactId".hashCode()
+        var result = groupId.hashCode()
+        result = 31 * result + artifactId.hashCode()
+        result = 31 * result + version.hashCode() // Version included for uniqueness in sets like visitedInThisCall
+        return result
     }
 
     override fun equals(other: Any?): Boolean {
@@ -213,8 +286,7 @@ data class Artifact(
 
         if (groupId != other.groupId) return false
         if (artifactId != other.artifactId) return false
-        if (version != other.version) return false
-        if (repository != other.repository) return false
+        if (version != other.version) return false // Version included
 
         return true
     }

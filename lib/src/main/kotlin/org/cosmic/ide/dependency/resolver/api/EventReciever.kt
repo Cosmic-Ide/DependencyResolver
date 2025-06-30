@@ -13,7 +13,7 @@ open class EventReciever {
 
     val logger: Logger = Logger.getLogger("DependencyResolver")
 
-    open fun onArtifactFound(artifact: Artifact) {
+    open fun artifactFound(artifact: Artifact) {
         logger.info("Found ${artifact.groupId}:${artifact.artifactId}:${artifact.version} in ${artifact.repository?.getName()}")
     }
 
